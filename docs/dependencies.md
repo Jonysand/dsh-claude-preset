@@ -71,7 +71,7 @@ OK
 | `@deepseek-ai/dsh-tool-todo` | 0.2.1-rc.2 | todo_write |
 | `@deepseek-ai/dsh-tool-web` | 0.2.1-rc.2 | web_search / web_fetch |
 | `dsh-claude-preset/lib/tool-surface.js` | 10.2 KB | 本仓库，工具面收敛与审计 |
-| `dsh-claude-preset/lib/tool-search.js` | 4.3 KB | 本仓库，延迟工具的暴露层 |
+| `dsh-claude-preset/lib/tool-search.js` | 12.7 KB | 本仓库，工具延迟：摘工具 + tool_search |
 | `dsh-claude-preset/lib/compaction-claude.js` | 9.7 KB | 本仓库，压缩摘要结构扩展 |
 
 ## 版本敏感点
@@ -85,10 +85,16 @@ OK
 2. `lib/tool-surface.js` 依赖 `ctx.tools.restrict({ deny })` 的语义：只收窄全局工具，
    对 preset 自己注册的 scoped 工具会抛 `unknown global tool`。上游若改成可收窄 scoped，
    这里的「抛错即保留」判断要改。
-3. `lib/tool-search.js` 依赖 `system-prompt/assemble` 这个 waterfall 的形状：监听器拿
-   `(assembly, context, next)`，`await next()` 之后的返回值是权威值，且 `tools` 是
-   一个可以整体替换的数组。上游若改了参数顺序、或者把工具改成单独一层，这里要重写。
-   它同时依赖「监听器按作用域分发」「返回值的 `tools` 直接进请求」两条语义。
+3. `lib/tool-search.js` 依赖三处 DSH 内部契约：
+   - `system-prompt/assemble` 这个 waterfall 的形状：监听器拿 `(assembly, context, next)`，
+     `await next()` 之后的返回值是权威值，`tools` 是可以整体替换的数组；
+   - `ctx.tools.register(definition)` 接受手工构造的 `{ name, description, parameters,
+     output: { schema, render }, execute }`，只校验 `output`，`parameters` 只要求是可无损
+     序列化的 JSON Schema（支持的关键字仅 type / oneOf / properties / required /
+     additionalProperties / items / enum / const 加四个注释字段）；
+   - `ctx.tools.schemas(agent)` 返回该 agent 作用域下的可见 schema。
+   任何一条变了，这里都要跟着改。它同时依赖「监听器按作用域分发」与「工具注册落在
+   preset 作用域」两条语义。
 4. `cordis.patch.yml` 里 `delegation`、`compaction`、`planning` 三处用了 isolate realm。
    preset 里 `ctx.provide()` 的服务必须声明 isolate，否则 registry 直接拒绝整个 preset
    （报 `Preset services require isolate realms`）。

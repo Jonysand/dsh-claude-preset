@@ -11,7 +11,7 @@
 |---|---|---|
 | 系统提示词 | 照抄静态段（Intro / System / Doing tasks / Executing actions with care / Using your tools / Tone and style / Output efficiency），只把工具名换成 DSH 的，文件引用改成 DSH 渲染得出来的写法 | `cordis.patch.yml` |
 | 工具面 | 只挂 Claude Code 有对应物的工具；宿主层多出来的工具在 preset 挂载时逐个 `restrict` 挡掉 | `lib/tool-surface.js` |
-| 工具延迟（暴露层） | 装配时把配置点名的工具从工具表摘掉，模型看不见但按名字仍可执行；默认一条不摘 | `lib/tool-search.js` |
+| 工具延迟 | 装配时把点名的工具从工具表摘掉，模型看不见但按名字仍可调用；`tool_search` 负责把 schema 取回来 | `lib/tool-search.js` |
 | 压缩摘要 | 把 compaction 的摘要指令换成 Claude Code 的检查点结构：新增 `## All User Messages`，把 `## Pending Jobs` 改名 `## Pending Tasks` 并扩写 | `lib/compaction-claude.js` |
 
 `persona.complete` 保持 `false`：Claude Code 自己也读 CLAUDE.md，所以 AGENTS.md 全局规则、技能目录、
@@ -73,21 +73,27 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 第二条只在工具表真的变化时才打印（工具数、字节、粗估 token、增删了谁）。
 
-## 工具延迟的暴露层
+## 工具延迟
 
-`lib/tool-search.js` 在每轮装配时把 `config.defer` 点名的工具从工具表里摘掉。摘掉只影响
-模型看见什么：执行从 registry 解析（`dsh-tools` 的 `resolveExecution`），不看这份装配结果，
-所以模型按名字调用照样能跑。
+`lib/tool-search.js` 做两件事，两半同生共死：
 
-**默认一条也不摘**，配置为空时插件是空操作。缺的不是过滤器，是发现入口——`tool_search`
-要到 Step 2 才有；没有它，摘掉的工具模型没有任何办法找回来。所以现在这层只占位。
+1. **摘工具**：每轮装配时把 `config.defer` 点名的工具从工具表里摘掉。摘掉只影响模型看见
+   什么：执行从 registry 解析（`dsh-tools` 的 `resolveExecution`），不看这份装配结果，
+   所以模型按名字调用照样能跑。
+2. **找回**：注册 `tool_search`，按名字或关键词查出这些工具的完整 JSON Schema，以
+   `<functions>` 块放进工具结果。拿到之后模型直接按名字调用，不需要包装工具。
+
+发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
+
+当前名单是保守起点：`web_fetch`、`job_list`、`job_output`、`job_kill`、`read_image`。
+`tool_search` 的描述里会列出这批名字，模型才知道有什么可查。要关掉就删掉 `config`。
 
 为什么在装配处摘、而不是用 `deferLoading`：模型可见的 tools 由装配决定，而 `dsh-llm` 在
 路由没有 `toolUpdate` 能力时会把 `deferLoading` 剥掉、把工具全发出去。那条路在非 Anthropic
 路由上静默失效。装配层摘掉是路由无关的。
 
-作用域不用担心：监听器挂在 preset 自己的插件树上，只收得到本 preset 代际的装配，同进程
-里别的 preset 不受影响（实测见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.8）。
+作用域不用担心：监听器和工具都挂在 preset 自己的插件树上，只对本 preset 代际的会话生效，
+同进程里别的 preset 不受影响（实测见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.8）。
 
 ## 安装
 
@@ -167,7 +173,7 @@ dsh --profile <临时 profile> "reply ok"
 cordis.patch.yml               preset 定义：prompt + 插件行 + isolate 分组
 package.json                   bundle 清单（dsh.bundle.patch 指向 cordis.patch.yml）
 lib/tool-surface.js            工具面收敛 + 工具表审计
-lib/tool-search.js             延迟工具的暴露层（默认不生效）
+lib/tool-search.js             工具延迟：装配时摘工具 + tool_search 找回
 lib/compaction-claude.js       压缩摘要结构扩展
 docs/dependencies.md           依赖清单与校验结论
 docs/deferred-tools-gaps.md    延迟加载为什么放弃（含实测数据）

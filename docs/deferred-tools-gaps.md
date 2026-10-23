@@ -6,8 +6,9 @@
 > 回本要 15~20 轮。下面的内容保留为"如果将来要重开延迟"的设计记录。
 >
 > 同日重开的第一步：Step 0 用探针确认了装配监听器的作用域（见 2.8），Step 1 落地了
-> 暴露层 `lib/tool-search.js`——装配时按配置摘工具，**默认一条不摘**。发现入口
-> （`tool_search`）还没做，所以这层目前是空操作。
+> 暴露层，Step 2 补上了发现入口——`lib/tool-search.js` 现在装配时按 `config.defer`
+> 摘工具，同时注册 `tool_search` 把 schema 查回来。当前名单是 5 个不常用工具，
+> 删掉 `config` 即回到全量常驻。
 
 当时这套机制（`tool-surface` 挡工具、`tool_search` 取回、`<system-reminder>` 宣告）
 在行为上已经对齐 cc-haha 的"发现"部分，剩下两条差距是结构性的：
