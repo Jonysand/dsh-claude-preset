@@ -8,7 +8,8 @@
 > 同日重开的第一步：Step 0 用探针确认了装配监听器的作用域（见 2.8），Step 1 落地了
 > 暴露层，Step 2 补上了发现入口——`lib/tool-search.js` 现在装配时按 `config.defer`
 > 摘工具，同时注册 `tool_search` 把 schema 查回来。Step 3 已在真实会话里跑通：
-> 模型搜到 schema 后直接调用了不在 `tools[]` 里的工具（见 2.9）。当前名单 9 个，
+> 模型搜到 schema 后直接调用了不在 `tools[]` 里的工具（见 2.9）。Step 4 也跑通了：
+> `/compact` 把 schema 压掉之后，模型自己重搜并调用成功（见 2.10）。当前名单 9 个，
 > 删掉 `config` 即回到全量常驻。
 
 当时这套机制（`tool-surface` 挡工具、`tool_search` 取回、`<system-reminder>` 宣告）
@@ -402,6 +403,42 @@ cc-haha 没有这个问题，因为它的工具数组从头到尾不变（`defer
 真正的回本点在 MCP 那种几千字节起步的工具包。名单随后扩到 9 个（加了
 `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`），因为这几个在真实
 会话里几乎不用。
+
+### 2.10 Step 4 实测：压缩后会重搜（2026-10-23）
+
+会话 `a1acd0ea`：两轮，第一轮抓 `example.com` 的标题，然后 `/compact`，第二轮抓
+`example.org`。这一场跑的是 9 个工具的名单。
+
+工具表按预期缩到 14 个（22 − 9 + `tool_search`），工具块 13,391 字节：摘掉 4,766 字节，
+`tool_search` 自己占 935，净省 3,831 字节。
+
+压缩本身记在 `compaction/summary`：
+
+- `shadowedRange` 是 8–25，`shadowedTokenCount` 3,408——第一轮整段（含 `tool_search`
+  的调用与结果）全部出上下文；
+- 摘要是一段普通 Markdown，里面没有 `<functions>`、没有参数 schema。它提到过
+  “`web_fetch` was not in the initially loaded tool list; retrieved with query
+  `select:web_fetch`”，但那是叙述，不是定义。
+
+压缩之后：
+
+| seq | 事件 |
+|---|---|
+| 45 | `request/header` `reason=series`，14 个工具，与压缩前完全一致 |
+| 47 | `tool_search {"query":"select:web_fetch"}` —— **模型自己又搜了一次** |
+| 48 | 结果与压缩前逐字相同的那段 `<functions>` |
+| 52 | `web_fetch https://example.org` |
+| 53 | `result: Fetched … (HTTP 200)` |
+
+也就是说，在第 1 种分支上收尾：**压缩丢掉 schema，模型自己重搜，重搜拿回同一份定义，
+调用成功**。不需要改压缩指令。
+
+两条附带结论：
+
+- 压缩不会动工具表。第二条 `request/header` 的 reason 是 `series` 而不是 `change`，
+  说明头部（含工具数组）逐字相同，只是请求序列重开了一次。
+- 名单写进 `tool_search` 的描述而不是发一条公告，这个选择在压缩场景里是决定性的：
+  公告是历史消息会被压掉，描述是工具 schema 压不掉。
 
 ---
 

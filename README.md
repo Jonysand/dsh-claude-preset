@@ -91,14 +91,15 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 `todo_write`、`web_search`、`subagent` 这类一律常驻。`tool_search` 的描述里会列出这批
 名字，模型才知道有什么可查。要关掉就删掉 `config`。
 
-实测（一轮 7 步的真实会话）：工具表 22 → 18，工具块 17,222 → 16,310 字节，整个会话只有
-一条 `request/header`；模型 `select:web_fetch` 拿到 schema 后，在下一轮直接调用了
-`web_fetch`——一个不在请求 `tools[]` 里的工具——执行成功。数据见
-[docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9。
+实测（真实会话）：9 个工具延迟后，工具表 22 → 14，工具块 17,222 → 13,391 字节，整场只有
+一条 `request/header`；模型 `select:web_fetch` 拿到 schema 后，下一轮直接调用 `web_fetch`
+——一个不在请求 `tools[]` 里的工具——执行成功。`/compact` 之后它先重搜了一次，拿到同一份
+schema 再调用，照样成功。数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)
+2.9 与 2.10。
 
-省下来的量要注意比例：延迟 5 个工具净省 912 字节（约 230 token），而 `tool_search` 自己
-占了 876 字节。也就是说**净收益 = 被延迟 schema 之和 − 876 字节**，这套东西只在延迟集
-足够大（MCP、大插件包）时才明显。
+省下来的量要注意比例：9 个工具摘掉 4,766 字节，`tool_search` 自己占 935 字节，净省 3,831
+字节（约 960 token），而且只在缓存的 0.1x 档位上省。也就是说**净收益 = 被延迟 schema 之和
+− `tool_search` 的开销**，这套东西只在延迟集足够大（MCP、大插件包）时才明显。
 
 为什么在装配处摘、而不是用 `deferLoading`：模型可见的 tools 由装配决定，而 `dsh-llm` 在
 路由没有 `toolUpdate` 能力时会把 `deferLoading` 剥掉、把工具全发出去。那条路在非 Anthropic
