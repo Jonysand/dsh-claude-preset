@@ -11,7 +11,7 @@
 |---|---|---|
 | 系统提示词 | 照抄静态段（Intro / System / Doing tasks / Executing actions with care / Using your tools / Tone and style / Output efficiency），只把工具名换成 DSH 的，文件引用改成 DSH 渲染得出来的写法 | `cordis.patch.yml` |
 | 工具面 | 只挂 Claude Code 有对应物的工具；宿主层多出来的工具在 preset 挂载时逐个 `restrict` 挡掉 | `lib/tool-surface.js` |
-| 压缩摘要 | 在 compaction 的摘要指令里补 `## All User Messages` 和 `## Pending Tasks` 两段 | `lib/compaction-claude.js` |
+| 压缩摘要 | 把 compaction 的摘要指令换成 Claude Code 的检查点结构：新增 `## All User Messages`，把 `## Pending Jobs` 改名 `## Pending Tasks` 并扩写 | `lib/compaction-claude.js` |
 
 `persona.complete` 保持 `false`：Claude Code 自己也读 CLAUDE.md，所以 AGENTS.md 全局规则、技能目录、
 运行时上下文（工作目录、时间）都保留，这比把 system prompt 裁成单独一段更接近它的真实行为。
@@ -122,7 +122,10 @@ dsh --profile <临时 profile> "reply ok"
   取回工具必然改工具表、必然整体失效前缀缓存。实测一次变化约等于 7 个普通轮次，回本要 15~20 轮。
   设计与实测数据在 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)。
 - **压缩摘要指令是整段替换**，不是拼接。上游改文案时这里要同步，否则会丢新版规则；
-  匹配不到基础指令时原样放行，不会弄坏请求。
+  匹配不到基础指令时原样放行，不会弄坏请求。上游的 `## Pending Jobs` 是被**有意改名**成
+  `## Pending Tasks` 的（名字跟 Claude Code 的压缩提示一致），不是漏抄。
+- 包装 `ctx.llm.stream` 用引用计数：多个作用域或前后两版预设先后挂载时只包一次，
+  最后一个卸载才还原，避免「新版先挂、旧版后卸」把补丁带走。
 - 没有 NotebookEdit 对应工具；`Read` 对 PDF 的支持 DSH 没有。
 - 权限提示不在 preset 里做，用 DSH 的 permission preset（`danger-full-access` 等）。
 - **只依赖 DSH 本体，不依赖任何第三方插件**。profile 里另外挂的插件不归 preset 管：它们的工具会被

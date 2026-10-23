@@ -77,7 +77,8 @@ OK
 
 1. `lib/compaction-claude.js` 整段替换了 compaction-basic 的摘要指令。上游改文案时，
    这里的 `INSTRUCTION` 要跟着改；替换条件用开头一句做匹配，匹配不到就原样放行，
-   不会把请求弄坏。
+   不会把请求弄坏。上游的 `## Pending Jobs` 在本仓库里有意改名成 `## Pending Tasks`
+   （名字跟 Claude Code 的压缩提示一致），升级后不要当成漏抄补回去。
 2. `lib/tool-surface.js` 依赖 `ctx.tools.restrict({ deny })` 的语义：只收窄全局工具，
    对 preset 自己注册的 scoped 工具会抛 `unknown global tool`。上游若改成可收窄 scoped，
    这里的「抛错即保留」判断要改。
