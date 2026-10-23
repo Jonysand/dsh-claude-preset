@@ -62,7 +62,10 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 | `base` only（例如 headless） | goal 三件套、`workflow`、`working_directory` 等，合计约 3.7KB，占 22 个工具、17.3KB 工具块的 21% |
 | `base` + `dsh-web-app`（桌面） | 通常只有 `working_directory`；`tool-goal`、`tool-workflow`、`tool-plugin-manager` 已被 web-app bundle 关掉，名单里这些名字空转 |
 
-装了 free-search 时另外还会有它的四个检索工具。日志里 `denied` 后面列的是这次真的挡掉的名字。
+free-search 的四个检索工具（`advanced_search`、`multi_search`、`platform_search`、
+`free_search_test`，合计 2,984 字节）**不挡**，交给 `tool-search` 延迟。原因在下面「工具延迟」一节。
+
+日志里 `denied` 后面列的是这次真的挡掉的名字。
 
 日志里能看到实际效果：
 
@@ -100,9 +103,14 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
   `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
-  `load_workspace_dependencies`、`subagent`、`glob`、`skill`
+  `load_workspace_dependencies`、`subagent`、`glob`、`skill`、`advanced_search`、
+  `multi_search`、`platform_search`、`free_search_test`
 - `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
   数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
+
+最后四个是 free-search 的检索工具，合计 2,984 字节。它们原来在 `tool-surface` 的拦截名单里，
+结果是模型照 `web_search` 描述末尾点的名字去搜，搜不到，白花一次往返（实测见 2.14）。现在改成
+延迟：平时不出现在表里，模型想换引擎时 `tool_search` 能搜到、拿到 schema 再调用。
 
 挑的原则：一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以高频的 `read`、`edit`、
 `pwsh`、`grep`、`web_search` 一律常驻。系统提示点名要求使用的工具（`todo_write`）同样常驻：
@@ -122,7 +130,7 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
   用了 1 次，都是拿到 schema 之后按名字直接调用。
 - 首轮例外打开后（2026-10-24）：一场 20 步、37 次调用的会话是两条 `request/header`——首轮
   22 个工具、17,222 字节，之后 10 个、10,925 字节。表变化后模型把被延迟的 `web_fetch` 搜出来，
-  随后用了 23 次，没有一次调用失败。
+  随后用了 23 次，没有一次调用失败。那次跑在四个检索工具挪进 `defer` 之前；现在首轮是 26 个。
 
 数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13、2.14。
 前四条是首轮例外之前跑的，那时全场只有一条 `request/header`；第五条是打开之后的。

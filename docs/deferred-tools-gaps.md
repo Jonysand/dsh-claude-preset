@@ -364,9 +364,9 @@ cc-haha 没有这个问题，因为它的工具数组从头到尾不变（`defer
 | `121974cd`（对照） | claude-code | 22 | 17,222 | `created` + `assemble` + `header` |
 
 `5fd7cb86` 的工具表里带着 `workflow`、`create_goal`、`present`、`schedule_*`、
-`advanced_search`、`working_directory`——全是本 preset 在挂载时挡掉的名字。探针看得到
-它就会直接打 `FOREIGN=`。实际一行都没有，而它那一轮有完整的 7 步和一条
-`request/header`（seq 15）。
+`advanced_search`（后来挪进 defer，见 2.14）、`working_directory`——这些名字要么在本 preset
+的拦截名单里，要么由 tool-search 延迟。探针看得到它就会直接打 `FOREIGN=`。实际一行都没有，
+而它那一轮有完整的 7 步和一条 `request/header`（seq 15）。
 
 对照会话 `121974cd` 是 8 分钟后新建的 claude-code 会话：同一个探针实例、没有第二次
 `mount`，照样打出了装配行。所以"没记录"不是探针死了，是它收不到。
@@ -617,8 +617,12 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 同样先搜一次再用。37 次调用没有一次失败。
 
 有一次空命中：seq 80 找 `multi_search`、`platform_search`、`advanced_search`、`free_search_test`，
-0 结果。这四个名字来自 `web_search` 自己的描述末尾，而那四个工具正是 `tool-surface` 挡掉的。
-和 2.12 的 `todo_write` 同一类问题——指令或描述点名了不存在的工具，模型会去找。
+0 结果。这四个名字来自 `web_search` 自己的描述末尾，而那四个工具被 `tool-surface` 挡掉了——
+挡的是注册表，`tool_search` 的取回通道跟着一起断。
+
+**已改（2026-10-24）。** 这四个从拦截名单挪到 `defer`，合计 2,984 字节（1,038 / 626 / 663 /
+657）。稳态仍是 10 个工具，首轮从 22 变 26。和 2.12 的 `todo_write` 同一类问题：指令或描述
+点名了工具，模型就真的会去找，挡掉它只换来一次空搜。
 
 **还没验的事。** 这条锚定效应对 Claude Code 复刻成不成立，我们没有自己的数据。他们的数据是
 Minimal 与 Standard 两个家族之间的分野，不是"像不像 Claude Code"。要验就同一道题跑若干次，

@@ -51,21 +51,30 @@ test('挂载时挡掉名单里的宿主工具', () => {
 				{ name: 'read' },
 				{ name: 'workflow' },
 				{ name: 'working_directory' },
-				{ name: 'advanced_search' },
+				{ name: 'plugin_manager' },
 				{ name: 'present' },
 				{ name: 'schedule_create' },
 				{ name: 'cordis_inspect_list' },
+				// free-search 的四个检索工具不在这里挡：它们交给 tool-search 延迟，
+				// 挡掉会连取回的路一起断掉。
+				{ name: 'advanced_search' },
+				{ name: 'multi_search' },
+				{ name: 'platform_search' },
+				{ name: 'free_search_test' },
 			],
 		})
 		apply(ctx)
 		assert.deepEqual(denied.sort(), [
-			'advanced_search',
 			'cordis_inspect_list',
+			'plugin_manager',
 			'present',
 			'schedule_create',
 			'workflow',
 			'working_directory',
 		])
+		for (const name of ['advanced_search', 'multi_search', 'platform_search', 'free_search_test']) {
+			assert.equal(denied.includes(name), false, `${name} 应该留给 tool-search 延迟`)
+		}
 		assert.match(stderr.lines.join('\n'), /restrict at mount:/)
 	} finally {
 		stderr.restore()

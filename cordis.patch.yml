@@ -238,6 +238,10 @@
           #   高频的（read / edit / pwsh / grep / web_search）一律常驻。
           #   系统提示点名要求使用的（todo_write）也必须常驻：实测模型手边有替代品时，
           #   宁可拿 pwsh 凑合，也不会为它多花一次 tool_search（见 docs/deferred-tools-gaps.md 2.12）。
+          #   free-search 的四个检索工具（advanced_search / multi_search / platform_search /
+          #   free_search_test，合计 2,984 字节）在这里延迟，不在 tool-surface 的拦截名单里：
+          #   web_search 的描述末尾点着这四个名字，模型想换引擎时会去搜；挡掉就是空搜一次，
+          #   延迟才是它真正的用法。实测见 2.14。
           # - deferPatterns：按类。MCP 工具名是 mcp__<server>__<tool>，数量随 server 变，
           #   只能按模式表达。本 preset 当前没有 MCP server，这条是给将来接 MCP 留的；
           #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
@@ -255,24 +259,24 @@
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill']
+              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test']
               deferPatterns: ['mcp__*']
               firstRequestFullCatalog: true
           # 工具面收敛 + 缓存代价观测。不做延迟加载。
           #
           # 规则：只挡住明确不属于 Claude Code 语义的宿主工具——goal 三件套、
-          # workflow、working_directory、plugin_manager、free-search 的四个检索工具
-          # （advanced_search / multi_search / platform_search / free_search_test）、
-          # load_workspace_dependencies，以及 cordis_inspect_* / present / schedule_*
-          # 这类按前缀识别的。名单短且稳定，挡掉即消失，不提供取回通道。
+          # workflow、working_directory、plugin_manager、load_workspace_dependencies，
+          # 以及 cordis_inspect_* / present / schedule_* 这类按前缀识别的。名单短且稳定，
+          # 挡掉即消失，不提供取回通道。
+          # free-search 的四个检索工具不在这里挡：它们交给 tool-search 延迟，挡掉连取回
+          # 的路一起断掉。web_search 的描述末尾点着这四个名字，模型会去搜。
           # schemas() 不带 scope 就是全局视图，列出的都是能收窄的全局工具；
           # preset 自己的 scoped 工具不在其中，不会被误挡。
           #
           # 实际挡掉多少取决于组合：base-only 时 goal 三件套和 workflow 都在全局层，
           # 合计约 3.7KB（占 22 个工具、17.3KB 工具块的 21%）；Web/Desktop 组合里
           # dsh-web-app 已把 tool-goal / tool-workflow / tool-plugin-manager 设成
-          # disabled，名单里这些名字空转，通常只剩 working_directory
-          # （装了 free-search 时再加四个检索工具）。
+          # disabled，名单里这些名字空转，通常只剩 working_directory。
           #
           # 收敛时机：agent loop 的顺序是「装配 → pre-step → 记 request/header」，
           # 装配在 pre-step 之前，所以 pre-step 里挡工具永远只改变下一次请求，

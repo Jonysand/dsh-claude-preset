@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -288,12 +289,14 @@ test('不开首轮例外时，有会话也照样立刻延迟', async () => {
 test('描述里列全被延迟的名字，不按字母序丢掉尾部', () => {
 	const stderr = captureStderr()
 	try {
-		// 这份名单就是 cordis.patch.yml 里在用的那一份：按字母序 web_fetch 排最后，
-		// 一旦截断，恰好是最常被系统提示点名的工具消失。
-		const defer = [
-			'web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent',
-			'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill',
-		]
+		// 直接读 cordis.patch.yml 里在用的那一份，别抄一份：抄的那份已经漂过一次。
+		// 按字母序 web_fetch 排最后，一旦截断，恰好是最常被系统提示点名的工具消失。
+		const patch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+		const row = patch.split('\n').find((line) => line.trim().startsWith('defer: ['))
+		assert.ok(row !== undefined, 'cordis.patch.yml 里找不到 defer 名单')
+		const defer = [...row.matchAll(/'([^']+)'/g)].map((match) => match[1])
+		assert.ok(defer.length > 10, `defer 名单只解析出 ${defer.length} 个名字`)
+
 		const { ctx, registered } = harness([])
 		apply(ctx, { defer, deferPatterns: ['mcp__*'] })
 		const { description } = registered[0]
