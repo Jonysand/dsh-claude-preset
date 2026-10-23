@@ -76,7 +76,7 @@ OK
 
 ## 版本敏感点
 
-升级 DSH 之后，下面四处要重新核对，其余行是稳定挂载：
+升级 DSH 之后，下面五处要重新核对，其余行是稳定挂载：
 
 1. `lib/compaction-claude.js` 整段替换了 compaction-basic 的摘要指令。上游改文案时，
    这里的 `INSTRUCTION` 要跟着改；替换条件用开头一句做匹配，匹配不到就原样放行，
@@ -98,3 +98,9 @@ OK
 4. `cordis.patch.yml` 里 `delegation`、`compaction`、`planning` 三处用了 isolate realm。
    preset 里 `ctx.provide()` 的服务必须声明 isolate，否则 registry 直接拒绝整个 preset
    （报 `Preset services require isolate realms`）。
+5. `lib/tool-search.js` 的 `deferPatterns` 默认写的是 `mcp__*`，它建立在一个不归本仓库
+   管的约定上：`@deepseek-ai/dsh-mcp-client` 把远端工具发布成 `mcp__<serverName>__<rawName>`
+   （`serverName` 限 `[A-Za-z0-9_-]{1,32}`，rawName 归一化有损时追加 12 位 hash）。
+   命名规则一变，`mcp__*` 就匹配不到任何东西，延迟静默失效；`tool_search` 的
+   `select:<裸工具名>` 也依赖 `__` 这段分隔符。升级后拿一个 MCP 会话跑
+   `request/header` 看一眼工具名即可确认。

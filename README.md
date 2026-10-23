@@ -170,6 +170,18 @@ dsh --profile <临时 profile> "reply ok"
 
 真实会话的核对点是会话日志里的 `request/header` 事件：`data.header.tools` 就是模型当轮看到的工具表。
 
+## 测试
+
+`lib/` 下三个插件的逻辑都有单测：装配改写、通配与裸名选取、工具面拒绝名单与补扫、
+压缩指令替换与引用计数。零依赖，用的是 Node 自带的 test runner：
+
+```powershell
+node --test        # 或 pnpm test
+```
+
+测试拿假 `ctx` 直接调用插件的 `apply()`，不启动 DSH；插件打到 stderr 的日志被收进断言里，
+所以跑起来是安静的。当前 22 项。
+
 ## 已知差异与限制
 
 - **preset 是 revision 级，不是会话级**。插件树按 preset 定义挂一次、所有会话共用；挡住或放开
@@ -199,9 +211,10 @@ package.json                   bundle 清单（dsh.bundle.patch 指向 cordis.pa
 lib/tool-surface.js            工具面收敛 + 工具表审计
 lib/tool-search.js             工具延迟：装配时摘工具 + tool_search 找回
 lib/compaction-claude.js       压缩摘要结构扩展
+test/                          三个插件的单测（node --test，零依赖）
 docs/dependencies.md           依赖清单与校验结论
 docs/deferred-tools-gaps.md    延迟加载为什么放弃（含实测数据）
-docs/plugin-config-audit.md    DSH 各工具包的可配置项审计（18 个包）
+docs/plugin-config-audit.md    DSH 各工具包的可配置项审计（19 个包）
 docs/archive/tool-search.js    废弃的 tool_search 实现，仅作设计留档
 docs/archive/request-probe.js  作用域探针（Step 0 用毕归档，可重新挂载）
 ```

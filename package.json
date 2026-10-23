@@ -5,6 +5,9 @@
   "description": "Claude Code 会话行为复刻 preset for DeepSeek Harness: ported system prompt (doing tasks / executing actions with care / using your tools / tone and style / output efficiency) over Claude Code's tool surface.",
   "license": "MIT",
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

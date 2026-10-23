@@ -2,13 +2,13 @@
 
 只读审计。没有安装 bundle，没有改 profile，没有动 `~/.dsh`。
 
-- 审计对象：18 个包，全部列在第 1 节总表。
+- 审计对象：19 个包，全部列在第 1 节总表。
 - 版本：DSH `0.2.1-rc.2`（app.asar 内各包 package.json）。
 - 目标：判断「少工具 + 短 schema」能靠 `config.plugins` 做到多少。
 
 ## 0. 方法与一个必须说明的限制
 
-`cordis_inspect_query`（platform=host, provider=Config）在本 profile 里只对状态为 `schema` 的 entry 投影 JSON Schema。18 个候选包中，凡是被 preset 引用的工具行，`listConfigs` 返回的都是：
+`cordis_inspect_query`（platform=host, provider=Config）在本 profile 里只对状态为 `schema` 的 entry 投影 JSON Schema。19 个候选包中，凡是被 preset 引用的工具行，`listConfigs` 返回的都是：
 
 ```json
 {
@@ -54,6 +54,7 @@
 | 16 | `dsh-tool-present` | `maxFiles=8` | 否 | 否（单工具） | 没有；maxFiles 只限单次调用 |
 | 17 | `dsh-compaction-tool-result-pruner` | `thresholdChars=8192`、`headChars=4096`、`tailChars=1024` | n/a | n/a | 在压缩触发时把超长工具结果砍成 head+marker+tail；三值越小越省 |
 | 18 | `dsh-compaction-basic` | `thresholdRatio=0.8`、`headroomTokens=65536`、`retainRatio=0.16`、`retainTokens`（未设）、`summarizationProvider=""`、`summarizationModel=""`、`maxTokens=65536`、`compactionRetries=1`、`maxOverflowRetries=1`、`modelPolicies=[]`、`auto=true` | n/a | n/a | 决定何时摘要、保留多少原文；不能压 system prompt / tools / 单条不可分单元 |
+| 19 | `dsh-mcp-client` | `transport`/`serverName`（必填）、`command`+`args`+`env`+`cwd`（stdio）、`url`+`headers`（http）、`toolCallTimeoutMs=60000`、`failOnStartupError=false`、`maxInstructionBytes=32768`、`reconnect.enabled=true`/`initialDelayMs=500`/`maxDelayMs=30000`/`maxAttempts=10` | 否（description 来自远端 server） | 否（工具集由 server 决定，本地只能整条卸载） | 工具数量本身就是大头，只能靠延迟加载；`maxInstructionBytes` 只封顶注入的 server 指令 |
 
 ---
 
@@ -400,6 +401,39 @@ auto: boolean                     // true
 - 它明确压不了 system prompt、tools、session prefix，也拆不开单个不可分单元。
 - 结论：这是「历史压缩」的旋钮，不是「工具面变短」的旋钮。
 
+### 2.19 `@deepseek-ai/dsh-mcp-client`
+
+一个 config 条目 = 一台 server。`Config` 是两支 union（源码 `lib/index.js` 780–800 行）：
+
+```ts
+// stdio 支
+{
+  transport: z.const("stdio"),
+  serverName: z.string().required().pattern(/[A-Za-z0-9_-]{1,32}/),
+  command: z.string().required(),
+  args: z.array(String).default([]),
+  env: z.dict(String).default({}),
+  cwd: z.string().default(""),
+  toolCallTimeoutMs: z.number().default(60000),
+  failOnStartupError: z.boolean().default(false),
+  maxInstructionBytes: z.number().step(1).min(1).default(32768),
+  reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 }
+}
+// streamable-http 支：command/args/env/cwd 换成 url(必填) + headers
+```
+
+- 工具名是 `mcp__<serverName>__<rawName>`，由 server 侧决定，**本地不可改名、不可只挑一部分**。
+- description、参数 schema、工具数量全部来自远端，没有任何本地开关能缩短或裁剪——
+  要减只能整条 config 删掉。
+- `maxInstructionBytes` 是唯一和 token 有关的旋钮，但它管的是 server 提供的系统提示词文本：
+  超过上限直接连接失败（`throw`），不是截断。所以它是「要么全要、要么连不上」。
+- `failOnStartupError=false`（默认）意味着 server 起不来时 harness 照常启动、工具不出现，
+  只在日志里留一条错误。排查「工具怎么突然没了」先看这里。
+- 工具集会在 server 重连/通知时整体换代；冲突的更新被整体拒绝，不会留下半个工具集。
+- 结论：这个包没有「让 MCP 变小」的 config 手段。几十上百个工具要省，只能靠
+  `lib/tool-search.js` 的 `deferPatterns: ['mcp__<server>__*']` 把它们从装配里摘掉，
+  见仓库 README 的「工具延迟」一节。
+
 ---
 
 ## 3. 必须写新插件才能做到的事
@@ -509,7 +543,8 @@ diff 只进 presentation meta（`computeHunkDiffs` → UI 卡片），不进模�
 
 ## 4. 一句话结论
 
-- 18 个包里，只有 3 个能直接改工具 description：`str-replace-editor`、`pwsh-persistent`、`bash-persistent`；`persona` 另可改系统提示词，但不碰工具 schema。
-- 能靠 config 真正「减工具」的只有 `tool-fs`（4 个开关）和 `tool-web`（2 个开关）；`tool-subagent` 靠实例数/改名间接控制。
+- 19 个包里，只有 3 个能直接改工具 description：`str-replace-editor`、`pwsh-persistent`、`bash-persistent`；`persona` 另可改系统提示词，但不碰工具 schema。
+- 能靠 config 真正「减工具」的只有 `tool-fs`（4 个开关）和 `tool-web`（2 个开关）；`tool-subagent` 靠实例数/改名间接控制；`mcp-client` 连这个都做不到，它没有本地工具面。
 - 必须写新插件的目标共 5 项：① 改其余包的 description；② 改参数名/参数说明/enum 文案；③ 工具改名成 Read/Edit/Bash；④ `edit` 输出 unified diff；⑤ 拆 fs-search/jobs 的内部工具。
 - `readLimit` 是例外：它已经能实现「read 硬截断到 N 行」，不要再为这个写插件。
+- MCP 的「工具太多」也不在 config 能力范围内，只能在装配层延迟——这正是本仓库 `tool-search` 存在的理由。
