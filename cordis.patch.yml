@@ -234,10 +234,14 @@
           # （advanced_search / multi_search / platform_search / free_search_test）、
           # load_workspace_dependencies，以及 cordis_inspect_* / present / schedule_*
           # 这类按前缀识别的。名单短且稳定，挡掉即消失，不提供取回通道。
-          # preset 自己注册的 scoped 工具不会被误挡：restrict 只收窄全局工具，
-          # 对 scoped 名字会抛 "unknown global tool"，插件捕获后跳过。
+          # schemas() 不带 scope 就是全局视图，列出的都是能收窄的全局工具；
+          # preset 自己的 scoped 工具不在其中，不会被误挡。
           #
-          # 名单里的工具都会从工具块里消失（合计约 3.7KB，占实测 22 个工具、17.3KB 工具块的 21%）。
+          # 实际挡掉多少取决于组合：base-only 时 goal 三件套和 workflow 都在全局层，
+          # 合计约 3.7KB（占 22 个工具、17.3KB 工具块的 21%）；Web/Desktop 组合里
+          # dsh-web-app 已把 tool-goal / tool-workflow / tool-plugin-manager 设成
+          # disabled，名单里这些名字空转，通常只剩 working_directory
+          # （装了 free-search 时再加四个检索工具）。
           #
           # 收敛时机：agent loop 的顺序是「装配 → pre-step → 记 request/header」，
           # 装配在 pre-step 之前，所以 pre-step 里挡工具永远只改变下一次请求，

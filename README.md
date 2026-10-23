@@ -45,20 +45,29 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 两件事值得说明：
 
-1. **不用维护完整名单**。`ctx.tools.restrict` 只收窄全局工具，preset 自己注册的 scoped 工具
-   会抛 `unknown global tool`。插件把这条错误当成「这是本 preset 的工具」，原样保留；其它错误
-   单独记日志。所以名单只写要挡的宿主工具，preset 自己加了什么都不会被误伤。
+1. **不用维护完整名单**。`schemas()` 不带 scope 就是全局视图，列出的都是 `restrict` 能收窄的
+   全局工具；preset 自己注册的 scoped 工具根本不在这个列表里，不会被误挡。名单只写要挡的
+   宿主工具即可。
 2. **只在挂载时扫一次**。agent loop 的顺序是「装配工具 → `agent/pre-step` → 记 `request/header`」，
    在 pre-step 里挡工具只能改变下一轮——那正好制造一次工具表变化、一次全前缀重建
    （本机实测 7,090 input token，等于 7 个普通轮次）。晚注册的工具（桌面端的
    `load_workspace_dependencies`）就留在表里，比付一次重建便宜。唯一的例外是挂载时压根没拿到
    工具表：那时什么都没挡住，`agent/pre-step` 会补扫一次。
 
+**挡掉多少取决于组合**，这点容易被名单误导：
+
+| 组合 | 实际被挡的 |
+|---|---|
+| `base` only（例如 headless） | goal 三件套、`workflow`、`working_directory` 等，合计约 3.7KB，占 22 个工具、17.3KB 工具块的 21% |
+| `base` + `dsh-web-app`（桌面） | 通常只有 `working_directory`；`tool-goal`、`tool-workflow`、`tool-plugin-manager` 已被 web-app bundle 关掉，名单里这些名字空转 |
+
+装了 free-search 时另外还会有它的四个检索工具。日志里 `denied` 后面列的是这次真的挡掉的名字。
+
 日志里能看到实际效果：
 
 ```
-[tool-surface] restrict at mount: denied get_goal,create_goal,update_goal,working_directory,workflow
-[tool-surface] baseline #1: <工具数> tools, <字节> bytes (~<tokens> tok est)
+[tool-surface] restrict at mount: denied working_directory
+[tool-surface] baseline #1: <工具数> tools, <字节> bytes (~<tokens> tok est) | session <id>
 ```
 
 第二条只在工具表真的变化时才打印（工具数、字节、粗估 token、增删了谁）。
@@ -128,6 +137,9 @@ dsh --profile <临时 profile> "reply ok"
   最后一个卸载才还原，避免「新版先挂、旧版后卸」把补丁带走。
 - 没有 NotebookEdit 对应工具；`Read` 对 PDF 的支持 DSH 没有。
 - 权限提示不在 preset 里做，用 DSH 的 permission preset（`danger-full-access` 等）。
+- **压缩补丁是进程级的，但按会话判定**。`ctx.llm` 是宿主单例，补丁在 preset 挂载时（进程启动）
+  就装上；每次压缩请求都会按发起它的 agent 绑的 preset 判定一次，只改 `claude-code` 会话，
+  其它 preset 原样透传。判定不了时按旧行为处理并打一行 warn。
 - **只依赖 DSH 本体，不依赖任何第三方插件**。profile 里另外挂的插件不归 preset 管：它们的工具会被
   挡掉，但它们自己往 system prompt 里加的说明照常进提示词。核对方法见
   [docs/dependencies.md](docs/dependencies.md)。
