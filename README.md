@@ -85,8 +85,20 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
 
-当前名单是保守起点：`web_fetch`、`job_list`、`job_output`、`job_kill`、`read_image`。
-`tool_search` 的描述里会列出这批名字，模型才知道有什么可查。要关掉就删掉 `config`。
+当前名单：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
+`list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`。挑的都是用得少的：
+一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以 `read`、`edit`、`pwsh`、`grep`、
+`todo_write`、`web_search`、`subagent` 这类一律常驻。`tool_search` 的描述里会列出这批
+名字，模型才知道有什么可查。要关掉就删掉 `config`。
+
+实测（一轮 7 步的真实会话）：工具表 22 → 18，工具块 17,222 → 16,310 字节，整个会话只有
+一条 `request/header`；模型 `select:web_fetch` 拿到 schema 后，在下一轮直接调用了
+`web_fetch`——一个不在请求 `tools[]` 里的工具——执行成功。数据见
+[docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9。
+
+省下来的量要注意比例：延迟 5 个工具净省 912 字节（约 230 token），而 `tool_search` 自己
+占了 876 字节。也就是说**净收益 = 被延迟 schema 之和 − 876 字节**，这套东西只在延迟集
+足够大（MCP、大插件包）时才明显。
 
 为什么在装配处摘、而不是用 `deferLoading`：模型可见的 tools 由装配决定，而 `dsh-llm` 在
 路由没有 `toolUpdate` 能力时会把 `deferLoading` 剥掉、把工具全发出去。那条路在非 Anthropic

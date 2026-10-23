@@ -7,7 +7,8 @@
 >
 > 同日重开的第一步：Step 0 用探针确认了装配监听器的作用域（见 2.8），Step 1 落地了
 > 暴露层，Step 2 补上了发现入口——`lib/tool-search.js` 现在装配时按 `config.defer`
-> 摘工具，同时注册 `tool_search` 把 schema 查回来。当前名单是 5 个不常用工具，
+> 摘工具，同时注册 `tool_search` 把 schema 查回来。Step 3 已在真实会话里跑通：
+> 模型搜到 schema 后直接调用了不在 `tools[]` 里的工具（见 2.9）。当前名单 9 个，
 > 删掉 `config` 即回到全量常驻。
 
 当时这套机制（`tool-surface` 挡工具、`tool_search` 取回、`<system-reminder>` 宣告）
@@ -373,6 +374,34 @@ cc-haha 没有这个问题，因为它的工具数组从头到尾不变（`defer
 
 这条结论只覆盖**监听器分发**，不覆盖 `restrict()` 的作用域——方案 B 里"从共享监听器
 调用 `agent.ctx.tools.restrict()` 是否按 agent 生效"仍然未验证，要另跑一次探针。
+
+### 2.9 Step 2/3 实测：摘掉、搜到、直接调用（2026-10-23）
+
+会话 `f9a8eaf9`，claude-code preset，一轮 7 步、11 次工具调用。当时配的延迟名单是
+`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`。
+
+| 观测点 | 结果 |
+|---|---|
+| 工具表 | 22 → 18；少的正好是配置那 5 个，多的正好是 `tool_search` |
+| 工具块字节 | 17,222 → 16,310（同一口径：`JSON.stringify(tools)` 的 UTF-8 字节） |
+| `request/header` | 整场只有一条，`reason: initial`——工具表没再动过 |
+| 发现 | 第 2 步 `tool_search {"query":"select:web_fetch"}`，结果 288 字节，正文是一段 `<functions>` 加完整 schema |
+| 直接调用 | 第 3 步调用 `web_fetch`——它不在请求的 `tools[]` 里——返回 `Fetched … (HTTP 200)` 与正文 |
+| 后续 | 同一会话又调了 4 次 `web_fetch`，全部成功；另有一次 `TypeError: fetch failed`，是网络错误，不是准入拒绝 |
+
+这条实测把方案的赌注验完了：**暴露与执行确实是两层**。工具从装配里消失，注册表里还在，
+模型按名字调用照样跑通，不需要包装工具、不需要 `DeferredToolCall`。
+
+成本要按同一口径算：
+
+- 摘掉的 5 个 schema 合计 1,788 字节；
+- `tool_search` 自己 876 字节（含描述里那串名字）；
+- 净省 912 字节，约 228 token，而且只在缓存的 0.1x 档位上省。
+
+也就是说 **净收益 ≈ 被延迟 schema 之和 − 876 字节**。延迟 5 个小工具基本是白忙；
+真正的回本点在 MCP 那种几千字节起步的工具包。名单随后扩到 9 个（加了
+`list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`），因为这几个在真实
+会话里几乎不用。
 
 ---
 
