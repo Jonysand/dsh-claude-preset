@@ -141,3 +141,7 @@ docs/archive/tool-search.js    废弃的 tool_search 实现，仅作设计留档
 
 - 会话装配与工具清单：[NanmiCoder/cc-haha](https://github.com/NanmiCoder/cc-haha)
 - 工具命名与运行时：DeepSeek Harness `0.2.1-rc.2`
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。
