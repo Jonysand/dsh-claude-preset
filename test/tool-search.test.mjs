@@ -23,6 +23,7 @@ function captureStderr() {
 /** 最小可用 ctx：记下注册的工具和监听器，schemas() 返回给定工具表。 */
 function harness(schemas) {
 	const listeners = new Map()
+	const options = new Map()
 	const registered = []
 	const ctx = {
 		logger: { info() {}, warn() {} },
@@ -35,14 +36,15 @@ function harness(schemas) {
 				return schemas
 			},
 		},
-		on(name, listener) {
+		on(name, listener, option) {
 			const list = listeners.get(name) ?? []
 			list.push(listener)
 			listeners.set(name, list)
+			if (option !== undefined) options.set(name, option)
 			return () => {}
 		},
 	}
-	return { ctx, registered, listener: (name) => listeners.get(name)?.[0] }
+	return { ctx, registered, listener: (name) => listeners.get(name)?.[0], options: (name) => options.get(name) }
 }
 
 test('matchesPattern 只认一个星号', () => {
@@ -187,6 +189,19 @@ test('apply 注册发现工具并改写装配', async () => {
 			['read', 'tool_search'],
 		)
 		assert.equal(assembled.variables.provider, 'p')
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('装配过滤器带 prepend，后注册的监听器加塞的工具也会被摘掉', () => {
+	const stderr = captureStderr()
+	try {
+		const { ctx, options } = harness([])
+		apply(ctx, { defer: ['read'] })
+		// 环绕式 waterfall：不带 prepend 就注册在链尾，后处理最先跑，
+		// 之后别的监听器再往 tools 里加东西，这一段就看不见了。
+		assert.deepEqual(options('system-prompt/assemble'), { prepend: true })
 	} finally {
 		stderr.restore()
 	}
