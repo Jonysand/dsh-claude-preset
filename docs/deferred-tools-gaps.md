@@ -440,6 +440,36 @@ cc-haha 没有这个问题，因为它的工具数组从头到尾不变（`defer
 - 名单写进 `tool_search` 的描述而不是发一条公告，这个选择在压缩场景里是决定性的：
   公告是历史消息会被压掉，描述是工具 schema 压不掉。
 
+### 2.11 按类延迟：MCP 与通配（2026-10-23）
+
+MCP 工具没法写精确名单：名字是 `mcp__<server>__<tool>`，随 server 增减，一个 server 就是
+几十上百个。所以配置加了第二层 `deferPatterns`，只认一个 `*`：
+
+```yaml
+defer: ['web_fetch', 'glob', ...]
+deferPatterns: ['mcp__*']
+```
+
+实现上把"精确名单 + 模式"合成一个 matcher，装配过滤和搜索目录共用它，`tool_search`
+自己在 `has()` 里硬编码为永不匹配——否则一个 `tool_*` 模式就能把找回入口关掉。
+
+配套改了两处搜索逻辑，都是为 MCP 服务的：
+
+1. **裸名选取**：`select:create_issue` 能选中 `mcp__github__create_issue`。重名（两个 server
+   都有 `create_issue`）时全部返回，让模型自己看描述选。
+2. **必选词按段比**：名字先切成段（`mcp/github/create/issue`），`+rea` 只匹配段等于 `rea`
+   的工具。改之前是子串匹配，`+rea` 会命中 `create_issue`——`create` 里就藏着 "rea"。
+   描述里的匹配也改成整词边界，同一个理由。
+
+描述的名单超过 12 个就截断成"前 12 个 + and N more"，通配另起一句。MCP 走通配，不进名单，
+所以描述不会随 server 膨胀。
+
+顺带记一个没做的机会：本机 `reverse` preset 里挂着 REA MCP——170 个逆向工具、约 43 万字符
+schema（作者自己在注释里写的）。那是这套东西真正的目标场景：按 4 字符/token 折算，光工具块
+就十万 token 量级。但 `tool-search` 是 preset 作用域的，`claude-code` 这边的实例根本看不到
+那边的工具；要让收益落到那里，得在 `reverse` preset 的插件列表里也挂一行同样的 `tool-search`。
+那一行在用户 profile 的 patch 里，不在本仓库。
+
 ---
 
 ## 三、两者的关系

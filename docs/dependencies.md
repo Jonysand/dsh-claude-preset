@@ -71,7 +71,7 @@ OK
 | `@deepseek-ai/dsh-tool-todo` | 0.2.1-rc.2 | todo_write |
 | `@deepseek-ai/dsh-tool-web` | 0.2.1-rc.2 | web_search / web_fetch |
 | `dsh-claude-preset/lib/tool-surface.js` | 10.2 KB | 本仓库，工具面收敛与审计 |
-| `dsh-claude-preset/lib/tool-search.js` | 12.7 KB | 本仓库，工具延迟：摘工具 + tool_search |
+| `dsh-claude-preset/lib/tool-search.js` | 16.8 KB | 本仓库，工具延迟：摘工具 + tool_search |
 | `dsh-claude-preset/lib/compaction-claude.js` | 9.7 KB | 本仓库，压缩摘要结构扩展 |
 
 ## 版本敏感点

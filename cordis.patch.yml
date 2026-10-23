@@ -232,14 +232,20 @@
           # 摘掉只影响模型看见什么，不影响执行：执行从 registry 解析，不看装配结果，
           # 所以搜索拿到 schema 之后按名字直接调用即可，不需要包装工具。
           # 两半同生共死：tool_search 注册失败时整层不启用，免得工具被摘掉又找不回来。
-          # 名单按「用得少」挑：一旦被延迟，首次使用要多花一次 tool_search 往返，
-          # 所以常用的（read / edit / pwsh / grep / todo_write / web_search / subagent）
-          # 一律常驻。要关掉：删掉 config，或把 defer 置空。
+          #
+          # 名单分两类：
+          # - defer：精确名字。挑「用得少」的，一旦被延迟，首次使用要多花一次 tool_search；
+          #   高频的（read / edit / pwsh / grep / web_search）一律常驻。
+          # - deferPatterns：按类。MCP 工具名是 mcp__<server>__<tool>，数量随 server 变，
+          #   只能按模式表达。本 preset 当前没有 MCP server，这条是给将来接 MCP 留的；
+          #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
+          # 要关掉：删掉 config，或把 defer / deferPatterns 都清空。
           # 作用域：监听器和工具都只对本 preset 代际的会话生效（2.8 已实测）。
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork']
+              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'todo_write', 'glob', 'skill']
+              deferPatterns: ['mcp__*']
           # 工具面收敛 + 缓存代价观测。不做延迟加载。
           #
           # 规则：只挡住明确不属于 Claude Code 语义的宿主工具——goal 三件套、

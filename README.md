@@ -85,21 +85,32 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
 
-当前名单：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
-`list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`。挑的都是用得少的：
-一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以 `read`、`edit`、`pwsh`、`grep`、
-`todo_write`、`web_search`、`subagent` 这类一律常驻。`tool_search` 的描述里会列出这批
-名字，模型才知道有什么可查。要关掉就删掉 `config`。
+名单分两类：
 
-实测（真实会话）：9 个工具延迟后，工具表 22 → 14，工具块 17,222 → 13,391 字节，整场只有
+- `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
+  `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
+  `load_workspace_dependencies`、`subagent`、`todo_write`、`glob`、`skill`
+- `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
+  数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
+
+挑的原则：一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以高频的 `read`、`edit`、
+`pwsh`、`grep`、`web_search` 一律常驻。`tool_search` 的描述里会列出名单（超过 12 个就截断），
+模型才知道有什么可查。要关掉就删掉 `config`。
+
+实测（真实会话，当时是 9 个工具）：工具表 22 → 14，工具块 17,222 → 13,391 字节，整场只有
 一条 `request/header`；模型 `select:web_fetch` 拿到 schema 后，下一轮直接调用 `web_fetch`
 ——一个不在请求 `tools[]` 里的工具——执行成功。`/compact` 之后它先重搜了一次，拿到同一份
 schema 再调用，照样成功。数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)
 2.9 与 2.10。
 
-省下来的量要注意比例：9 个工具摘掉 4,766 字节，`tool_search` 自己占 935 字节，净省 3,831
-字节（约 960 token），而且只在缓存的 0.1x 档位上省。也就是说**净收益 = 被延迟 schema 之和
-− `tool_search` 的开销**，这套东西只在延迟集足够大（MCP、大插件包）时才明显。
+14 个工具那一版按同一口径推算：摘掉 8,503 字节，`tool_search` 涨到 1,211 字节（描述里多了
+五个名字和一行通配说明），工具块约 **9,930 字节**，净省约 7,292 字节（约 1,820 token）。
+注意这只在缓存的 0.1x 档位上省，**净收益 = 被延迟 schema 之和 − `tool_search` 的开销**，
+所以这套东西真正的回本点是 MCP 那种几万字符起步的工具包。
+
+搜索对 MCP 有两条专门处理：`select:<裸工具名>` 能选中 `mcp__<server>__<tool>`
+（重名就都给出来）；关键词按 `mcp__server__tool` 切段，`+rea` 这类必选词按整段比，
+不会被 `create` 里的 "rea" 误命中。
 
 为什么在装配处摘、而不是用 `deferLoading`：模型可见的 tools 由装配决定，而 `dsh-llm` 在
 路由没有 `toolUpdate` 能力时会把 `deferLoading` 剥掉、把工具全发出去。那条路在非 Anthropic
