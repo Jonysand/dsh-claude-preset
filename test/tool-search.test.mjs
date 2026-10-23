@@ -207,6 +207,84 @@ test('装配过滤器带 prepend，后注册的监听器加塞的工具也会被
 	}
 })
 
+test('首轮给全表：只摘掉 tool_search 自己，第一次工具调用之后才延迟', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-anchor', events: [{ type: 'session' }] }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		const assemble = listener('system-prompt/assemble')
+		const context = { agent: { session } }
+		const next = async () => ({ tools: [{ name: 'read' }, { name: 'glob' }, { name: 'tool_search' }] })
+
+		const first = await assemble({ tools: [] }, context, next)
+		assert.deepEqual(first.tools.map((tool) => tool.name), ['read', 'glob'])
+
+		// 落下第一次持久的工具调用之后，同一个会话转成延迟表
+		listener('session/event')(session, { type: 'tool/call', seq: 3 })
+		const later = await assemble({ tools: [] }, context, next)
+		assert.deepEqual(later.tools.map((tool) => tool.name), ['glob', 'tool_search'])
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('恢复会话不重放首轮：历史里已有工具调用就直接用延迟表', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = {
+			id: 'session-resumed',
+			snapshotEvents: () => [{ type: 'session' }, { type: 'tool/call', seq: 9 }],
+		}
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		const assembled = await listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: { session } },
+			async () => ({ tools: [{ name: 'read' }, { name: 'tool_search' }] }),
+		)
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['tool_search'])
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('读不出会话历史时按已过首轮处理，不放全表', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-broken', snapshotEvents() { throw new Error('boom') } }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		const assembled = await listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: { session } },
+			async () => ({ tools: [{ name: 'read' }, { name: 'tool_search' }] }),
+		)
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['tool_search'])
+		assert.match(stderr.lines.join('\n'), /phase: session history unreadable/)
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('不开首轮例外时，有会话也照样立刻延迟', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-off', events: [] }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'] })
+		const assembled = await listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: { session } },
+			async () => ({ tools: [{ name: 'read' }, { name: 'glob' }, { name: 'tool_search' }] }),
+		)
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['glob', 'tool_search'])
+		assert.equal(listener('session/event'), undefined)
+	} finally {
+		stderr.restore()
+	}
+})
+
 test('描述里列全被延迟的名字，不按字母序丢掉尾部', () => {
 	const stderr = captureStderr()
 	try {

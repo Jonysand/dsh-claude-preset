@@ -243,11 +243,21 @@
           #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
           # 要关掉：删掉 config，或把 defer / deferPatterns 都清空。
           # 作用域：监听器和工具都只对本 preset 代际的会话生效（2.8 已实测）。
+          #
+          # 首轮例外（firstRequestFullCatalog）：第一次请求原样返回装配结果，只摘掉
+          # tool_search 自己——那正好是 Claude Code 原本那张表，一个不多一个不少。
+          # 等会话落下第一次持久的工具调用（tool/call）之后才开始摘。理由不是省字节
+          # （首轮反而更贵），是锚定：模型会按第一轮看到的工具目录决定接下来怎么干活，
+          # 首轮目录一变，复刻的行为也跟着漂。
+          # 代价是每场多一条 request/header：首轮 22 个工具、17,222 字节，之后 10 个、
+          # 10,925 字节。70 步那场按 69 步结账，仍净省 69 × 6,297 字节。
+          # 相位从会话事件重建：恢复会话扫一次历史，压缩不重置，所以只会多这一条。
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
               defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill']
               deferPatterns: ['mcp__*']
+              firstRequestFullCatalog: true
           # 工具面收敛 + 缓存代价观测。不做延迟加载。
           #
           # 规则：只挡住明确不属于 Claude Code 语义的宿主工具——goal 三件套、

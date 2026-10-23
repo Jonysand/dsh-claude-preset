@@ -85,6 +85,17 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
 
+首轮例外（`firstRequestFullCatalog`，本 preset 开着）：第一次请求一个工具都不摘，工具表
+就是 Claude Code 原本那张（22 个），只把 `tool_search` 自己拿掉——这一轮没有东西可搜，
+留着只会误导。等这个会话落下第一次持久的工具调用，之后才开始摘。
+
+为什么：模型会用第一轮看见的工具目录锚定接下来怎么干活，首轮目录一变，复刻出来的行为
+也跟着漂。这和省字节的方向相反，首轮反而更贵；换来的是稳态照样省，一场 70 步的会话只在
+首轮付全价。
+
+相位从会话事件重建，不是进程内状态：恢复会话时扫一次历史，压缩不重置。所以一个会话只会
+多这一条 `request/header`。
+
 名单分两类：
 
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
@@ -110,7 +121,9 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
   一次没变（全场只有一条 `request/header`），延迟的 `subagent` 用了 4 次、`send_message`
   用了 1 次，都是拿到 schema 之后按名字直接调用。
 
-数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13。
+数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13、2.14。
+上面四条都是首轮例外之前跑的，那时全场只有一条 `request/header`。打开之后每场是两条：
+首轮 22 个工具、17,222 字节，之后 10 个、10,925 字节。
 
 注意这只在缓存的 0.1x 档位上省，**净收益 = 被延迟 schema 之和 − `tool_search` 的开销**，
 所以这套东西真正的回本点是 MCP 那种几万字符起步的工具包。
