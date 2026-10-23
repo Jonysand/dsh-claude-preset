@@ -9,8 +9,8 @@
 > 暴露层，Step 2 补上了发现入口——`lib/tool-search.js` 现在装配时按 `config.defer`
 > 摘工具，同时注册 `tool_search` 把 schema 查回来。Step 3 已在真实会话里跑通：
 > 模型搜到 schema 后直接调用了不在 `tools[]` 里的工具（见 2.9）。Step 4 也跑通了：
-> `/compact` 把 schema 压掉之后，模型自己重搜并调用成功（见 2.10）。当前名单 9 个，
-> 删掉 `config` 即回到全量常驻。
+> `/compact` 把 schema 压掉之后，模型自己重搜并调用成功（见 2.10）。当前名单 14 个，
+> 另加通配 `mcp__*`（见 2.11），删掉 `config` 即回到全量常驻。
 
 当时这套机制（`tool-surface` 挡工具、`tool_search` 取回、`<system-reminder>` 宣告）
 在行为上已经对齐 cc-haha 的"发现"部分，剩下两条差距是结构性的：

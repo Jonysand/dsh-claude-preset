@@ -5,7 +5,7 @@
 依据是 [NanmiCoder/cc-haha](https://github.com/NanmiCoder/cc-haha) 里整理的 Claude Code 会话装配代码：
 `src/constants/prompts.ts` 那套按固定顺序拼装的 system prompt、工具清单，以及压缩检查点的摘要结构。
 
-## 它由三部分组成
+## 它由四部分组成
 
 | 部分 | 做法 | 文件 |
 |---|---|---|
