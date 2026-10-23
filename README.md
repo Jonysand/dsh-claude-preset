@@ -24,7 +24,8 @@
 | Read / Write / Edit / NotebookEdit | `read` / `write` / `edit` / `read_image`（无 NotebookEdit 对应） |
 | Glob / Grep | `glob` / `grep` |
 | TodoWrite | `todo_write` |
-| Task / TaskOutput / TaskStop | `subagent`、`subagent_fork` / `job_list`、`job_output`、`job_kill` |
+| Task / TaskOutput / TaskStop | `subagent`、`subagent_fork` / `send_message`、`list_agents` / `interrupt_agent` |
+| BashOutput / KillShell | `job_list`、`job_output` / `job_kill`（后台 shell 作业） |
 | WebSearch / WebFetch | `web_search` / `web_fetch` |
 | Skill | `skill` |
 | AskUserQuestion | `ask_user_question` |
@@ -45,12 +46,13 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 两件事值得说明：
 
 1. **不用维护完整名单**。`ctx.tools.restrict` 只收窄全局工具，preset 自己注册的 scoped 工具
-   会抛 `unknown global tool`。插件把抛错当成「这是本 preset 的工具」，原样保留。所以名单只写
-   要挡的宿主工具，preset 自己加了什么都不会被误伤。
+   会抛 `unknown global tool`。插件把这条错误当成「这是本 preset 的工具」，原样保留；其它错误
+   单独记日志。所以名单只写要挡的宿主工具，preset 自己加了什么都不会被误伤。
 2. **只在挂载时扫一次**。agent loop 的顺序是「装配工具 → `agent/pre-step` → 记 `request/header`」，
    在 pre-step 里挡工具只能改变下一轮——那正好制造一次工具表变化、一次全前缀重建
-   （本机实测约 7.2K input token，等于 7 个普通轮次）。晚注册的工具（桌面端的
-   `load_workspace_dependencies`）就留在表里，比付一次重建便宜。
+   （本机实测 7,090 input token，等于 7 个普通轮次）。晚注册的工具（桌面端的
+   `load_workspace_dependencies`）就留在表里，比付一次重建便宜。唯一的例外是挂载时压根没拿到
+   工具表：那时什么都没挡住，`agent/pre-step` 会补扫一次。
 
 日志里能看到实际效果：
 
@@ -144,4 +146,8 @@ docs/archive/tool-search.js    废弃的 tool_search 实现，仅作设计留档
 
 ## 许可证
 
-MIT，见 [LICENSE](LICENSE)。
+本仓库的代码与文档用 MIT，见 [LICENSE](LICENSE)。
+
+`cordis.patch.yml` 里的 persona 文本是 Anthropic Claude Code 的 system prompt 副本
+（经 cc-haha 转写，只改了工具名和文件引用写法）。MIT 只覆盖本仓库原创的部分，
+这段文本的再分发条件以 Anthropic 的条款为准。

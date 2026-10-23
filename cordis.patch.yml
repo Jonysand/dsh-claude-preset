@@ -94,7 +94,7 @@
                   - To edit files use edit instead of sed or awk
                   - To create files use write instead of cat with heredoc or echo redirection
                   - To search for files use glob instead of find or ls
-                  - To search the content of files, use grep instead of grep or rg
+                  - To search the content of files, use grep instead of shell grep or rg
                   - Reserve the shell tool exclusively for system commands and terminal operations that require shell execution. If you are unsure and there is a relevant dedicated tool, default to using the dedicated tool and only fall back on the shell tool if it is absolutely necessary.
                  - Break down and manage your work with the todo_write tool. It is helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.
                  - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.
@@ -237,14 +237,15 @@
           # preset 自己注册的 scoped 工具不会被误挡：restrict 只收窄全局工具，
           # 对 scoped 名字会抛 "unknown global tool"，插件捕获后跳过。
           #
-          # 名单里的工具都会从工具块里消失（合计约 3.7KB，占实测工具块 18%）。
+          # 名单里的工具都会从工具块里消失（合计约 3.7KB，占实测 22 个工具、17.3KB 工具块的 21%）。
           #
           # 收敛时机：agent loop 的顺序是「装配 → pre-step → 记 request/header」，
           # 装配在 pre-step 之前，所以 pre-step 里挡工具永远只改变下一次请求，
-          # 那正好制造一次工具表变化、一次全前缀重建（实测 7.8K input token）。
+          # 那正好制造一次工具表变化、一次全前缀重建（实测 7,090 input token）。
           # 因此收敛只在 apply()（agent 创建时，早于第一次装配）做一次，之后不再动；
           # Desktop 的 load_workspace_dependencies 这类晚注册工具就留在表里——
           # 留着比付一次重建便宜得多。
+          # 只有挂载时拿不到工具表才例外：那样一条都没挡住，agent/pre-step 会补扫一次。
           #
           # 审计行只在 request/header 变化时输出：工具数、总字节、按 4 字符/token 粗估
           # 的 token、这次相比上次增删了谁。工具块变一次，缓存就从那个 token 起失效一次。
