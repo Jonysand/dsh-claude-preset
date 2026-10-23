@@ -13,7 +13,9 @@
 - 本机 DSH：`0.2.1-rc.2`（`DeepSeek Harness.exe` 内置）
 - 校验方法：解析 `cordis.patch.yml` 里所有 `name:`，逐个读取对应包的 `package.json`，
   同时检查子路径导出（`exports` 里有没有 `./<sub>`）
-- 结果：**23 处引用全部可解析，0 缺失，0 子路径错误**
+- 结果：**25 处引用全部可解析，0 缺失，0 子路径错误**。计数不含 3 行 `cordis:group` 和
+  preset 自己的展示名。本轮新增的 1 行是 `lib/tool-search.js`（已确认文件存在），其余 24 行
+  沿用上一轮逐包核对的结果；此前的「23 处」少算了一行重复的 `dsh-tool-subagent`。
 
 ## 不与第三方插件耦合
 
@@ -21,9 +23,9 @@
 
 | 检查 | 结果 |
 |---|---|
-| `lib/*.js` 的 import / require | 0 条，两个插件只用注入的 `ctx` |
+| `lib/*.js` 的 import / require | 0 条，三个文件只用注入的 `ctx` |
 | `package.json` 的 dependencies / peerDependencies | 都没有 |
-| `cordis.patch.yml` 的 `name:` | 21 行 `@deepseek-ai/*`（DSH 自带，版本与 DSH 相同）+ 2 行本仓库文件 |
+| `cordis.patch.yml` 的 `name:` | 22 行 `@deepseek-ai/*`（DSH 自带，版本与 DSH 相同）+ 3 行本仓库文件 |
 | 按包名探测其它插件 | 没有 |
 
 `tool-surface` 的名单里出现 `advanced_search`、`load_workspace_dependencies` 这类名字，但那是**工具名**，
@@ -68,12 +70,13 @@ OK
 | `@deepseek-ai/dsh-tool-ask-user` | 0.2.1-rc.2 | ask_user_question |
 | `@deepseek-ai/dsh-tool-todo` | 0.2.1-rc.2 | todo_write |
 | `@deepseek-ai/dsh-tool-web` | 0.2.1-rc.2 | web_search / web_fetch |
-| `dsh-claude-preset/lib/tool-surface.js` | 7.5 KB | 本仓库，工具面收敛与审计 |
-| `dsh-claude-preset/lib/compaction-claude.js` | 6.4 KB | 本仓库，压缩摘要结构扩展 |
+| `dsh-claude-preset/lib/tool-surface.js` | 10.2 KB | 本仓库，工具面收敛与审计 |
+| `dsh-claude-preset/lib/tool-search.js` | 4.3 KB | 本仓库，延迟工具的暴露层 |
+| `dsh-claude-preset/lib/compaction-claude.js` | 9.7 KB | 本仓库，压缩摘要结构扩展 |
 
 ## 版本敏感点
 
-升级 DSH 之后，下面三处要重新核对，其余行是稳定挂载：
+升级 DSH 之后，下面四处要重新核对，其余行是稳定挂载：
 
 1. `lib/compaction-claude.js` 整段替换了 compaction-basic 的摘要指令。上游改文案时，
    这里的 `INSTRUCTION` 要跟着改；替换条件用开头一句做匹配，匹配不到就原样放行，
@@ -82,6 +85,10 @@ OK
 2. `lib/tool-surface.js` 依赖 `ctx.tools.restrict({ deny })` 的语义：只收窄全局工具，
    对 preset 自己注册的 scoped 工具会抛 `unknown global tool`。上游若改成可收窄 scoped，
    这里的「抛错即保留」判断要改。
-3. `cordis.patch.yml` 里 `delegation`、`compaction`、`planning` 三处用了 isolate realm。
+3. `lib/tool-search.js` 依赖 `system-prompt/assemble` 这个 waterfall 的形状：监听器拿
+   `(assembly, context, next)`，`await next()` 之后的返回值是权威值，且 `tools` 是
+   一个可以整体替换的数组。上游若改了参数顺序、或者把工具改成单独一层，这里要重写。
+   它同时依赖「监听器按作用域分发」「返回值的 `tools` 直接进请求」两条语义。
+4. `cordis.patch.yml` 里 `delegation`、`compaction`、`planning` 三处用了 isolate realm。
    preset 里 `ctx.provide()` 的服务必须声明 isolate，否则 registry 直接拒绝整个 preset
    （报 `Preset services require isolate realms`）。

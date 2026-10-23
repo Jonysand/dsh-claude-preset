@@ -227,6 +227,13 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+          # 延迟加载的暴露层（Step 1）：装配时从工具表里摘掉 config.defer 指定的工具。
+          # 默认不配 defer，插件是空操作——真正开启要等 tool_search 落地（Step 2），
+          # 否则摘掉的工具模型没有任何办法找回来。摘掉只影响模型看见什么，不影响执行：
+          # 执行从 registry 解析，不看装配结果。
+          # 作用域：监听器只收本 preset 代际的装配，同进程别的 preset 不受影响（2.8 已实测）。
+          - id: tool-search
+            name: 'dsh-claude-preset/lib/tool-search.js'
           # 工具面收敛 + 缓存代价观测。不做延迟加载。
           #
           # 规则：只挡住明确不属于 Claude Code 语义的宿主工具——goal 三件套、
