@@ -329,6 +329,46 @@ cc-haha 没有这个问题，因为它的工具数组从头到尾不变（`defer
 换句话说：**差距二修好之后，差距一仍然会在 resume 时收一次费**。要彻底消掉，只能走
 第一部分的路 A/B。
 
+### 2.8 Step 0 实测：装配监听器只看得到本 preset（2026-10-23）
+
+重开延迟加载要先回答一个问题：**挂在 preset 里的 `system-prompt/assemble` 监听器，
+会不会也收到别的 preset 的 agent 的装配？** 如果会，任何按需裁剪工具表的实现都会
+误伤其它 preset，方案等于作废。
+
+做法是把一个只读探针（`docs/archive/request-probe.js`）挂在本 preset 的插件列表末尾，
+它记录每次装配的 agent id、工具数、工具名，以及工具表里是否出现本 preset 明确挡掉的
+宿主工具（`workflow` / `create_goal` / `schedule_*` / `present` 等）。日志落
+`%TEMP%\dsh-request-probe-<pid>.log`。
+
+同一个进程（pid 65528）里同时跑两个 preset，一轮一个会话：
+
+| 会话 | 实际 preset | 工具数 | 工具块字节 | 探针记录 |
+|---|---|---|---|---|
+| `2ef4d717` | claude-code | 22 | 17,222 | `created` + `assemble` + `header` |
+| `5fd7cb86` | standard | 37 | 约 34 KB | 只有 `created` |
+| `121974cd`（对照） | claude-code | 22 | 17,222 | `created` + `assemble` + `header` |
+
+`5fd7cb86` 的工具表里带着 `workflow`、`create_goal`、`present`、`schedule_*`、
+`advanced_search`、`working_directory`——全是本 preset 在挂载时挡掉的名字。探针看得到
+它就会直接打 `FOREIGN=`。实际一行都没有，而它那一轮有完整的 7 步和一条
+`request/header`（seq 15）。
+
+对照会话 `121974cd` 是 8 分钟后新建的 claude-code 会话：同一个探针实例、没有第二次
+`mount`，照样打出了装配行。所以"没记录"不是探针死了，是它收不到。
+
+机制写在事件契约里（`cordis_inspect` 的 Event provider，`system-prompt/assemble` 原文）：
+
+> Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): **scoped listeners receive only that
+> scope's assemblies.**
+
+一个细节值得记下来：`5fd7cb86` 的 `session` 首行写的是 `agentPreset: "claude-code"`，
+第 4 个事件 `agent-preset/selected` 才写 `standard`。探针收到它的 `created`（建会话时
+还在本代际），4 秒后它切到 standard，之后的装配就与本代际无关了。所以监听器绑定的是
+**preset 代际**，不是进程。
+
+这条结论只覆盖**监听器分发**，不覆盖 `restrict()` 的作用域——方案 B 里"从共享监听器
+调用 `agent.ctx.tools.restrict()` 是否按 agent 生效"仍然未验证，要另跑一次探针。
+
 ---
 
 ## 三、两者的关系
