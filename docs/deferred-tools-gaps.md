@@ -598,6 +598,28 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 结账，仍是 69 × 6,297 ≈ 424 KB 的净省。真正变贵的是短会话：一次问答只有两次请求时，首轮全表 +
 次轮延迟，比一直延迟多 6,297 字节。
 
+**首次实测（2026-10-24 07:48）。** 会话 `23ee8da0`，任务「详细收集 kimi k3.1 pro 的消息并
+报告」，路由 `magpie / codemaker-chat/deepseek-flash`。1 个 turn、20 步、37 次工具调用、103 秒。
+
+| 序 | 事件 | reason | 工具数 | 字节 |
+|---|---|---|---|---|
+| seq 13 | `request/header` | `initial` | 22 | 17,222 |
+| seq 25 | `request/header` | `change` | 10 | 10,925 |
+
+全场两条，没有第三条。首轮那张表里没有 `tool_search`，22 个名字与 2.13 的基线逐字一致。
+
+切换发生在第一次 `tool/call`（seq 19、20 的两次 `web_search`）之后的下一轮。seq 26 是 harness
+自己发的 `developer/message`（`source.kind: tool-registry`）：一条 `tool-addition: tool_search`
+加 13 条 `tool-removal`。模型被明确告知表变了，不用自己猜。
+
+这条会话正好要 `web_fetch`——被延迟的 13 个之一。模型在表变化后的同一步里 `select:web_fetch`
+（seq 28）拿到 schema，紧接的三次调用并发抓页面（seq 36–38），全场用了 23 次。`read_image`
+同样先搜一次再用。37 次调用没有一次失败。
+
+有一次空命中：seq 80 找 `multi_search`、`platform_search`、`advanced_search`、`free_search_test`，
+0 结果。这四个名字来自 `web_search` 自己的描述末尾，而那四个工具正是 `tool-surface` 挡掉的。
+和 2.12 的 `todo_write` 同一类问题——指令或描述点名了不存在的工具，模型会去找。
+
 **还没验的事。** 这条锚定效应对 Claude Code 复刻成不成立，我们没有自己的数据。他们的数据是
 Minimal 与 Standard 两个家族之间的分野，不是"像不像 Claude Code"。要验就同一道题跑若干次，
 看开头风格和首个工具选择。在那之前，这只是把已知风险降一档，不是消除。
