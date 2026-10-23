@@ -106,12 +106,12 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
   重搜一次，拿到同一份 schema 再调用，照样成功。
 - 名单 14 个：工具表 22 → 9，工具块 9,925 字节。同一场里 `todo_write` 和 `glob` 没被搜出，
   被 `pwsh` 替代了，所以 `todo_write` 已挪回常驻。
+- 名单 13 个：工具表 22 → 10，工具块 10,925 字节。一场 70 步、88 次调用的会话里工具表
+  一次没变（全场只有一条 `request/header`），延迟的 `subagent` 用了 4 次、`send_message`
+  用了 1 次，都是拿到 schema 之后按名字直接调用。
 
-数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)
-2.9 与 2.10。
+数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13。
 
-14 个工具那一版按同一口径推算：摘掉 8,503 字节，`tool_search` 涨到 1,211 字节（描述里多了
-五个名字和一行通配说明），工具块约 **9,930 字节**，净省约 7,292 字节（约 1,820 token）。
 注意这只在缓存的 0.1x 档位上省，**净收益 = 被延迟 schema 之和 − `tool_search` 的开销**，
 所以这套东西真正的回本点是 MCP 那种几万字符起步的工具包。
 
