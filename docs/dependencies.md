@@ -15,6 +15,34 @@
   同时检查子路径导出（`exports` 里有没有 `./<sub>`）
 - 结果：**23 处引用全部可解析，0 缺失，0 子路径错误**
 
+## 不与第三方插件耦合
+
+本 preset 只依赖 DSH 本体和本仓库的文件，不认识任何第三方插件：
+
+| 检查 | 结果 |
+|---|---|
+| `lib/*.js` 的 import / require | 0 条，两个插件只用注入的 `ctx` |
+| `package.json` 的 dependencies / peerDependencies | 都没有 |
+| `cordis.patch.yml` 的 `name:` | 21 行 `@deepseek-ai/*`（DSH 自带，版本与 DSH 相同）+ 2 行本仓库文件 |
+| 按包名探测其它插件 | 没有 |
+
+`tool-surface` 的名单里出现 `advanced_search`、`load_workspace_dependencies` 这类名字，但那是**工具名**，
+不是包引用：它只处理当前可见工具表里真实存在的名字，名字对应的插件没装就什么都不发生。名单是
+「挡掉什么」的声明，不是「必须装什么」的依赖。
+
+实测办法：只挂 `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本 preset 的隔离 profile，
+没有任何第三方 bundle，能正常挂载：
+
+```
+[tool-surface] restrict at mount: denied get_goal,create_goal,update_goal,working_directory,workflow
+OK
+```
+
+这五个来自 base；名单里其余名字全部缺席，不报错、不影响挂载。
+
+改这个仓库时的准则：新增逻辑只用 `@deepseek-ai/*` 的公开服务和 Cordis 的 `ctx`，不要为了适配
+某个第三方插件写分支。profile 里另外挂的插件本就不归 preset 管。
+
 ## 包清单
 
 | 引用 | 版本 | 用途 |

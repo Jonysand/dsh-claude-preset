@@ -125,6 +125,9 @@ dsh --profile <临时 profile> "reply ok"
   匹配不到基础指令时原样放行，不会弄坏请求。
 - 没有 NotebookEdit 对应工具；`Read` 对 PDF 的支持 DSH 没有。
 - 权限提示不在 preset 里做，用 DSH 的 permission preset（`danger-full-access` 等）。
+- **只依赖 DSH 本体，不依赖任何第三方插件**。profile 里另外挂的插件不归 preset 管：它们的工具会被
+  挡掉，但它们自己往 system prompt 里加的说明照常进提示词。核对方法见
+  [docs/dependencies.md](docs/dependencies.md)。
 
 ## 目录
 
