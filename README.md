@@ -89,18 +89,25 @@ goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行
 
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
   `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
-  `load_workspace_dependencies`、`subagent`、`todo_write`、`glob`、`skill`
+  `load_workspace_dependencies`、`subagent`、`glob`、`skill`
 - `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
   数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
 
 挑的原则：一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以高频的 `read`、`edit`、
-`pwsh`、`grep`、`web_search` 一律常驻。`tool_search` 的描述里会列出名单（超过 12 个就截断），
-模型才知道有什么可查。要关掉就删掉 `config`。
+`pwsh`、`grep`、`web_search` 一律常驻。系统提示点名要求使用的工具（`todo_write`）同样常驻：
+实测模型手边有替代品时，宁可拿 `pwsh` 凑合，也不会为它多花一次往返。`tool_search` 的描述
+里会把名单全列出来，模型才知道有什么可查。要关掉就删掉 `config`。
 
-实测（真实会话，当时是 9 个工具）：工具表 22 → 14，工具块 17,222 → 13,391 字节，整场只有
-一条 `request/header`；模型 `select:web_fetch` 拿到 schema 后，下一轮直接调用 `web_fetch`
-——一个不在请求 `tools[]` 里的工具——执行成功。`/compact` 之后它先重搜了一次，拿到同一份
-schema 再调用，照样成功。数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)
+实测（真实会话）：
+
+- 名单 5 个：工具表 22 → 18，工具块 17,222 → 16,310 字节。模型 `select:web_fetch` 拿到
+  schema 后，下一轮直接调用 `web_fetch`——一个不在请求 `tools[]` 里的工具——执行成功。
+- 名单 9 个：工具表 22 → 14，工具块 13,391 字节。`/compact` 把 schema 压掉后，模型自己
+  重搜一次，拿到同一份 schema 再调用，照样成功。
+- 名单 14 个：工具表 22 → 9，工具块 9,925 字节。同一场里 `todo_write` 和 `glob` 没被搜出，
+  被 `pwsh` 替代了，所以 `todo_write` 已挪回常驻。
+
+数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)
 2.9 与 2.10。
 
 14 个工具那一版按同一口径推算：摘掉 8,503 字节，`tool_search` 涨到 1,211 字节（描述里多了

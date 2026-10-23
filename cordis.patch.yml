@@ -236,6 +236,8 @@
           # 名单分两类：
           # - defer：精确名字。挑「用得少」的，一旦被延迟，首次使用要多花一次 tool_search；
           #   高频的（read / edit / pwsh / grep / web_search）一律常驻。
+          #   系统提示点名要求使用的（todo_write）也必须常驻：实测模型手边有替代品时，
+          #   宁可拿 pwsh 凑合，也不会为它多花一次 tool_search（见 docs/deferred-tools-gaps.md 2.12）。
           # - deferPatterns：按类。MCP 工具名是 mcp__<server>__<tool>，数量随 server 变，
           #   只能按模式表达。本 preset 当前没有 MCP server，这条是给将来接 MCP 留的；
           #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
@@ -244,7 +246,7 @@
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'todo_write', 'glob', 'skill']
+              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill']
               deferPatterns: ['mcp__*']
           # 工具面收敛 + 缓存代价观测。不做延迟加载。
           #

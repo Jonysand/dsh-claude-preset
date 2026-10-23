@@ -9,8 +9,10 @@
 > 暴露层，Step 2 补上了发现入口——`lib/tool-search.js` 现在装配时按 `config.defer`
 > 摘工具，同时注册 `tool_search` 把 schema 查回来。Step 3 已在真实会话里跑通：
 > 模型搜到 schema 后直接调用了不在 `tools[]` 里的工具（见 2.9）。Step 4 也跑通了：
-> `/compact` 把 schema 压掉之后，模型自己重搜并调用成功（见 2.10）。当前名单 14 个，
-> 另加通配 `mcp__*`（见 2.11），删掉 `config` 即回到全量常驻。
+> `/compact` 把 schema 压掉之后，模型自己重搜并调用成功（见 2.10）。名单 14 个的那版
+> 也在真实会话里跑过，工具表压到 9 个（见 2.12）；同一场里发现系统提示点名的工具会被
+> 替代而不是被搜出，`todo_write` 已挪回常驻。当前名单 13 个，另加通配 `mcp__*`（见 2.11），
+> 删掉 `config` 即回到全量常驻。
 
 当时这套机制（`tool-surface` 挡工具、`tool_search` 取回、`<system-reminder>` 宣告）
 在行为上已经对齐 cc-haha 的"发现"部分，剩下两条差距是结构性的：
@@ -461,14 +463,68 @@ deferPatterns: ['mcp__*']
    的工具。改之前是子串匹配，`+rea` 会命中 `create_issue`——`create` 里就藏着 "rea"。
    描述里的匹配也改成整词边界，同一个理由。
 
-描述的名单超过 12 个就截断成"前 12 个 + and N more"，通配另起一句。MCP 走通配，不进名单，
-所以描述不会随 server 膨胀。
+描述的名单**原样全列，不截断**。一开始按 12 个截断，理由是"别让描述随名单膨胀"，
+但 2.12 的实测证明这个理由站不住：名单是配置作者写的、十几条几百字节，
+比它们各自的 schema 便宜两个数量级；而截断按字母序砍尾，`todo_write`、`web_fetch`
+这类最常被系统提示点名的工具恰好排在最后。MCP 走通配、不进名单，所以描述不会随 server 膨胀。
 
 顺带记一个没做的机会：本机 `reverse` preset 里挂着 REA MCP——170 个逆向工具、约 43 万字符
 schema（作者自己在注释里写的）。那是这套东西真正的目标场景：按 4 字符/token 折算，光工具块
 就十万 token 量级。但 `tool-search` 是 preset 作用域的，`claude-code` 这边的实例根本看不到
 那边的工具；要让收益落到那里，得在 `reverse` preset 的插件列表里也挂一行同样的 `tool-search`。
 那一行在用户 profile 的 patch 里，不在本仓库。
+
+### 2.12 名单 14 个的实测：体积达标，但点名的工具会被替代（2026-10-23）
+
+会话 `b2dab545`，claude-code preset，一轮 13 步、21 次工具调用（任务是逆向一个游戏客户端的指令通道）。
+
+**体积达标。** 第一条 `request/header` 是 9 个工具、9,925 字节，预测 9,930（预测时把通配
+MCP 的工具也算进去了，实际上这个 preset 一个 MCP server 都没挂）。基线 22 个 / 17,222
+字节，每次请求省 7,297 字节，约 1,824 token。`tool_search` 自己占 1,221 字节。
+
+**找回通路能用。** 模型调了两次 `tool_search`：`+rea +binary +analysis open_binary`、
+`select:open_binary,inspect_managed_artifact,analyze_javascript_application`。语法都对，
+都没命中——REA 那批工具挂在 `reverse` preset 上，这边看不到。返回是 "No deferred tool
+matched … 14 deferred tools are searchable"。没崩、没编造，模型直接改用手写 PE 解析。
+
+**没达成的部分：`todo_write` 和 `glob` 一次没调、一次没搜。**
+
+- `todo_write`：系统提示第 9,907 字符写着 "Break down and manage your work with the
+  todo_write tool"。但描述当时只列前 12 个名字、按字母序，`todo_write` 和 `web_fetch`
+  正好被压成 "and 2 more"——这个名字从头到尾没出现过。模型把计划全写在正文里
+  （"Plan: 1. PE import table…"）。
+- `glob`：系统提示第 9,488 字符写着 "To search for files use glob instead of find or ls"，
+  而且 `glob` **在**描述列出的 12 个名字里（字母序第一个）。模型照样用
+  `Get-ChildItem -Recurse` 扫了三次目录。
+
+所以问题不是名字看不看得见。手边有能干活的替代品时，模型不会为一个"更好用的工具"多花
+一次往返；把名字全列出来是必要条件，不是充分条件。
+
+各工具的实际字节数（22 工具基线，会话 `f2e0656d`）：
+
+| 工具 | 字节 | 系统提示提到 | `b2dab545` 是否用 |
+|---|---|---|---|
+| subagent_fork | 1,272 | 1 | 否 |
+| subagent | 1,165 | 5 | 否 |
+| todo_write | 858 | 1 | **否，也没搜** |
+| glob | 750 | 2 | **否，也没搜** |
+| list_agents | 661 | 0 | 否 |
+| load_workspace_dependencies | 632 | 0 | 否 |
+| job_output | 615 | 1 | 否 |
+| send_message | 527 | 0 | 否 |
+| interrupt_agent | 514 | 0 | 否 |
+| read_image | 389 | 0 | 否 |
+| job_kill | 370 | 1 | 否 |
+| skill | 332 | 4 | 否（用 `/reverse-engineer-anything` 直接注入） |
+| web_fetch | 242 | 2 | 否（任务不联网） |
+| job_list | 168 | 0 | 否 |
+
+**处置：**
+
+1. 描述改成全列，并补一句"指令里点了名、工具表里又没有的，多半在这里，先搜再绕过"。
+2. `todo_write` 挪回常驻，+858 字节。它被系统提示点名，缺了是静默的（用户看不到进度），
+   实测 0 次调用 0 次搜索。净省从 7,297 降到 6,439 字节。
+3. `glob` 继续延迟：替代品 `pwsh` 干活够用，代价只是绕开了提示词的偏好。
 
 ---
 

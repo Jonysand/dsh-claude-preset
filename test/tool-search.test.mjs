@@ -195,11 +195,11 @@ test('apply 注册发现工具并改写装配', async () => {
 test('描述里列全被延迟的名字，不按字母序丢掉尾部', () => {
 	const stderr = captureStderr()
 	try {
-		// 这份名单就是 cordis.patch.yml 里在用的那一份：按字母序 todo_write / web_fetch 排最后，
-		// 一旦截断，恰好是两个最常被系统提示点名的工具消失。
+		// 这份名单就是 cordis.patch.yml 里在用的那一份：按字母序 web_fetch 排最后，
+		// 一旦截断，恰好是最常被系统提示点名的工具消失。
 		const defer = [
 			'web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent',
-			'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'todo_write', 'glob', 'skill',
+			'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill',
 		]
 		const { ctx, registered } = harness([])
 		apply(ctx, { defer, deferPatterns: ['mcp__*'] })
