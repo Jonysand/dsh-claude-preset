@@ -617,6 +617,36 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
 **代价。** 每场仍多一条 `request/header`，但方向反过来了：首轮从整张表 27 个降到 2 个，稳态
 仍是 10 个。短会话现在两轮都便宜。
 
+**新相位首次实测（2026-10-24 08:16，会话 `3d7c5f13`）。** 任务：排查 Jenkins 构建错误（工作
+目录 `E:\H42\renderit`），路由 `magpie / codemaker-chat/deepseek-flash`。截到 36 步、35 次工具
+调用时全场只有两条 `request/header`，之后 34 次请求的工具表一个字节没动。
+
+| 序 | 事件 | reason | 工具数 | 字节 | 工具 |
+|---|---|---|---|---|---|
+| seq 11 | `request/header` | `initial` | 2 | 6,609 | `pwsh`、`str_replace_editor` |
+| seq 25 | `request/header` | `change` | 10 | 11,000 | 稳态延迟表 |
+
+跟上一版比：首轮 17,222 → 6,609 字节（少 10,613），稳态 10,925 → 11,000（多 75，是
+`tool_search` 描述里多了一个名字）。
+
+**上下文剥离生效。** 第 1 步的用户消息只有 `user`、`runtime-context`、`time-context` 三条；
+`agent-instructions`（seq 23）和 `skill-catalog`（seq 24）都排在第一次 `tool/call`（seq 16）
+之后、第 2 步开头。
+
+**首轮没有打转。** 第一条 assistant 是一句话：「I'll fetch the Jenkins console log to investigate
+the error.」，随后直接 `pwsh` 抓日志——没有去找当轮不存在的 `read`/`edit`/`todo_write`。这是
+2.12 记过的同一个现象：手边有能干活的替代品时，模型不为「更好用的工具」多花往返。
+
+**晋级那一刻照旧可行。** seq 16 那次 `pwsh` 拿到 403，下一轮表已换成延迟表（含 `skill` 的目录
+关系），模型在 seq 28 `tool_search select:skill`，seq 33 `skill jenkins-auth`，seq 38 读
+`auth-config.json`，seq 43 带 basic auth 重试。调用分布：`pwsh`×27、`read`×4、`grep`×2、
+`tool_search`×1、`skill`×1。唯一的失败是 `read` 撞上二进制文件（`diag_run.txt`），与相位无关。
+
+**一个直接的账：`str_replace_editor` 全场 0 次调用。** 首轮 6,609 字节里它是 3,102
+（6,609 − `pwsh` 的 3,507）。留着是为了凑那条实测里的「工具对」，代价就是这 3 KB。若只想留
+平台 shell，把引导集合改成单个 shell 名即可（那样首轮 3,507 字节，也更接近官方 0.2.1 的
+minimal——它只有一个持久 shell）。
+
 **首轮全表那一版的实测（2026-10-24 07:48，会话 `23ee8da0`）。** 任务「详细收集 kimi k3.1 pro
 的消息并报告」，路由 `magpie / codemaker-chat/deepseek-flash`，1 个 turn、20 步、37 次工具调用、
 103 秒。
@@ -642,10 +672,12 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
 
 - 这条锚定效应对 Claude Code 复刻成不成立。他们的数据是 Minimal 与 Standard 两个家族的分野，
   不是"像不像 Claude Code"；而我们的首轮是「长提示词 + 2 个工具」，这个组合在他们的实验里
-  没出现过。
+  没出现过。`3d7c5f13` 只说明这一场没有出问题，不说明行为更像 Claude Code——要验得同一道题
+  跑若干次，比开头风格和首个工具选择。
 - 首轮只有 2 个工具时，提示词点名了 `read`/`edit`/`todo_write`/`ask_user_question` 这些当轮
-  不存在的工具。这是 2.12 记过的「看得见的指令、看不见的工具」。一旦首轮开始绕，第一个要改的
-  是把 `read`/`edit` 加进 `bootstrapTools`，而不是撤掉相位。
+  不存在的工具。这是 2.12 记过的「看得见的指令、看不见的工具」。`3d7c5f13` 首轮直接用了
+  `pwsh`，没绕。真绕起来的话，第一个要改的是把 `read`/`edit` 加进 `bootstrapTools`，而不是
+  撤掉相位。
 
 ### 2.15 评估：要不要接 dsh-TUI 的 skill-search（2026-10-24）
 
