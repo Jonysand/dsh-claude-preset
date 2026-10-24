@@ -587,6 +587,10 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 窄表会一直留在这个会话里，第 2 轮要读文件才会发现 `read`/`grep` 根本不在表上。引导相位锚的
 是第一次请求，第 2 轮已经出了它的范围，所以 `turn/start` 的 `turn >= 2` 一到就退场。
 
+参考在这里是明确反过来的：它的 verify 脚本有一条 `reply-only` 用例，断言「只回文字不晋级」，
+理由是文字回复不消耗锚定。我们的取舍是：宁可让「先闲聊、再干活」的会话失去锚定，也不让第 2
+轮缺 `read`/`grep`——缺工具是当场就坏，锚定只是个概率。
+
 参考的第二件是剥上下文：`bootstrapSuppressContext` 列的 `skill-catalog` 与 `agent-instructions`
 在首步被摘掉。实现是 `agent/pre-step` 上的环绕监听器，带 `prepend` 插到链首——上游插件是在
 `next()` 之后才把自己的消息追加进 `decision.messages`，只有插到链首才等于剥在最后。
@@ -608,10 +612,12 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
 
 - 晋级之后给的是**延迟表**，不是全表。参考的稳态就是全量目录（它不做延迟加载）；本 preset 的
   稳态是 23 个工具（含 `tool_search`）。
-- 不换提示词。参考在这一相位里连 persona 都换成 Minimal 那句
-  `You are a helpful software engineer assistant.`（`complete: true`、关运行时上下文）。照搬
-  等于首轮把 Claude Code 提示词换成另一句话，与复刻目标直接冲突。
-- 压缩不重新锚定。参考在 `compaction/end` 之后回落到引导对（epoch-aware）。这里压缩不重置。
+- 不换提示词。参考那个 preset 整体换成 Minimal 身份：`dsh-persona` 配 `complete: true` 加
+  `includeRuntimeContext: false`，提示词就是 `You are a helpful software engineer assistant.`
+  整个 preset 生效，不是相位内切换。照搬等于把 Claude Code 提示词换成另一句话，与复刻目标
+  直接冲突。
+- 压缩不重新锚定。参考在 `compaction/end` 之后回落到引导对（epoch-aware）：每次压缩后再切
+  两次表。这里压缩不重置，会话里只切一次。
 
 **子代理跳过这个相位。** 判定按 `delegationDepth > 0`：会话头里的值与运行时
 `options.subagentDepth` 取较大者，口径同 `dsh-subagent` 的 `delegationDepthOf`（恢复回来的
