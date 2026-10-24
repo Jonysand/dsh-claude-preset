@@ -33,18 +33,29 @@
 | EnterPlanMode / ExitPlanMode | 计划模式 + `exit_plan_mode` |
 | 自动压缩 | `compaction-basic` + `/compact` |
 
-刻意不挂 `workflow`、`goal`、`schedule`。它们在 Claude Code 里有对应物（Workflow 工具、
-`/goal` 加 Stop hook、CronCreate），但在 DSH 里语义不同：goal 会自动续跑最多 40 轮，
-workflow 走 PTC 编排，挂上会改变行为而不是复刻行为。
+`present`、`goal` 三件套、`schedule_*`、`workflow`、`cordis_inspect_*`、`plugin_manager`
+都是后补挂上的。前五个在 Claude Code 里各有对应物（SendUserFile、`/goal` + Stop hook、
+CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_inspect_*` 没有对应物，
+是纯 DSH 能力，按你的要求一起开了。
 
-`present` 是例外：它对应 Claude Code 的 SendUserFile，语义一致，所以挂上了。但交付文件是
-低频动作，名字放进延迟名单——稳态不占工具表，要交付时用 `tool_search` 取回再调。
+除 `present` 放进延迟名单外，其余都在工具表里（不在 `defer`），因此第一轮被引导相位挡住，
+第一次工具调用之后直接可见。两点代价要记住：
+
+- `goal` 一旦建起来，宿主层的 `dsh-goal-round-driver` 会自动续跑，最多 40 轮——这是行为
+  变化，不是工具表变化。
+- `plugin_manager` 能让模型改本 profile 的插件配置，官方 `standard` preset 里这一行是
+  `disabled: true`，这里主动打开了。
 
 ## 工具面怎么收敛
 
 `lib/tool-surface.js` 的名单在文件顶部：`EXCLUDED_TOOLS` 是名字，`EXCLUDED_PATTERNS` 是前缀。
-挡的是这些：`create_goal` / `get_goal` / `update_goal`、`workflow`、`working_directory`、
-`plugin_manager`、`load_workspace_dependencies`，以及 `cordis_inspect*`、`schedule_*`。
+**现在只剩一条**：`working_directory`——它让模型换会话工作目录，Claude Code 没有对应物
+（靠 Bash 的 cwd）。
+
+原来的其余成员（goal 三件套、`workflow`、`plugin_manager`、`schedule_*`、`cordis_inspect*`、
+`load_workspace_dependencies`）在 web/desktop 里从来没被挡到过：宿主层把这些行设成
+`disabled: true`，模型看不见它们靠的是「没人挂」，不是「被挡住」。2026-10-24 核对了
+`dsh --profile web --dump-config` 之后把它们从名单里删了，需要的一律改成自己挂。
 
 没挡的三类，都是「挡掉会把取回的路一起断掉」：free-search 的四个检索工具、`present`、
 引导相位之外由 `tool-search` 延迟的一切。`restrict` 是注册表级的，被挡的名字不进装配、
@@ -58,16 +69,12 @@ workflow 走 PTC 编排，挂上会改变行为而不是复刻行为。
    宿主工具即可。
 2. **只在挂载时扫一次**。agent loop 的顺序是「装配工具 → `agent/pre-step` → 记 `request/header`」，
    在 pre-step 里挡工具只能改变下一轮——那正好制造一次工具表变化、一次全前缀重建
-   （本机实测 7,090 input token，等于 7 个普通轮次）。晚注册的工具（桌面端的
-   `load_workspace_dependencies`）就留在表里，比付一次重建便宜。唯一的例外是挂载时压根没拿到
-   工具表：那时什么都没挡住，`agent/pre-step` 会补扫一次。
+   （本机实测 7,090 input token，等于 7 个普通轮次）。晚注册的宿主工具就留在表里，比付一次
+   重建便宜。唯一的例外是挂载时压根没拿到工具表：那时什么都没挡住，`agent/pre-step` 会补扫
+   一次。
 
-**挡掉多少取决于组合**，这点容易被名单误导：
-
-| 组合 | 实际被挡的 |
-|---|---|
-| `base` only（例如 headless） | goal 三件套、`workflow`、`working_directory` 等，合计约 3.7KB，占 22 个工具、17.3KB 工具块的 21% |
-| `base` + `dsh-web-app`（桌面） | 通常只有 `working_directory`；`tool-goal`、`tool-workflow`、`tool-plugin-manager` 已被 web-app bundle 关掉，名单里这些名字空转 |
+在 web/desktop 里只剩 `working_directory` 一条会真的被挡——它也是宿主层唯一注册成全局工具、
+又该挡的模型可见工具。headless 组合不读 agent preset，这份名单在那里没有意义。
 
 free-search 的四个检索工具（`advanced_search`、`multi_search`、`platform_search`、
 `free_search_test`，合计 2,984 字节）**不挡**，交给 `tool-search` 延迟。原因在下面「工具延迟」一节。
@@ -119,9 +126,9 @@ shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`
 名单分两类：
 
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
-  `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
-  `load_workspace_dependencies`、`subagent`、`glob`、`skill`、`advanced_search`、
-  `multi_search`、`platform_search`、`free_search_test`、`str_replace_editor`、`present`
+  `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、`subagent`、`glob`、
+  `skill`、`advanced_search`、`multi_search`、`platform_search`、`free_search_test`、
+  `str_replace_editor`、`present`
 - `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
   数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
 

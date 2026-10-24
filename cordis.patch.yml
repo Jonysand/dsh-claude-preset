@@ -254,6 +254,42 @@
           # 这里是本 preset 自己挂的，挡住了就连取回的路一起断。
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+          # 宿主层把这些行设成了 disabled: true，模型看不见它们不是被拦截，是没人挂。
+          # 这里按需挂上，三种都不进 defer：第一轮由引导相位挡住（只留 shell 加编辑器），
+          # 晋级之后直接出现在工具表里。
+          #
+          # 定时任务：schedule_create / schedule_list / schedule_update / schedule_delete，
+          # 对应 Claude Code 的 CronCreate / CronList / ScheduleWakeup。
+          # 服务 dsh-schedule 在宿主层，插件只 inject tools。
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          # 目标：create_goal / get_goal / update_goal。
+          # 注意 dsh-goal-round-driver 在宿主层是开着的，所以目标一旦建立会自动续跑
+          # （最多 40 轮）——这是行为变化，不是工具表变化。
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          # 运行时检查：cordis_inspect_list / cordis_inspect_query / cordis_inspect_self。
+          # 宿主那行 dsh-tool-cordis/host 只注册 providers，工具要由 preset 自己挂。
+          - id: tool-cordis
+            name: '@deepseek-ai/dsh-tool-cordis'
+          # 插件管理：查、装、停本 profile 的插件。官方 standard preset 里这一行是
+          # disabled: true，这里打开——它让模型能改本 profile 的插件配置，权限不小。
+          - id: tool-plugin-manager
+            name: '@deepseek-ai/dsh-plugin-manager/tools'
+          # 工作流编排：需要同一个 realm 里有 workflowEngine 提供者，所以照
+          # standard preset 的写法单开一个 isolate 组，引擎与工具放在一起。
+          - id: workflow
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
           # 延迟加载的两半（Step 1 + Step 2）：装配时从工具表里摘掉 config.defer 指定的工具，
           # 同时注册 tool_search 作为找回入口。
           # 摘掉只影响模型看见什么，不影响执行：执行从 registry 解析，不看装配结果，
@@ -296,7 +332,7 @@
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test', 'str_replace_editor', 'present']
+              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test', 'str_replace_editor', 'present']
               deferPatterns: ['mcp__*']
               # shell 按平台二选一，与官方 minimal preset 的写法一致：POSIX 给 bash，
               # Windows 给 pwsh。行内写三元表达式会被 YAML 当成映射键，所以用折叠块。

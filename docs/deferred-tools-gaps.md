@@ -738,6 +738,44 @@ min 3），`docs/plugin-config-audit.md` 2.12 早就记过这条，preset 里却
 **没有跟着挂 `dsh-agent-tool-presentation`。** `ptc` preset 两个都挂，`standard` 只挂工具。
 本 preset 按后者：提示词里不加额外的交付指引，靠 `tool_search` 取回 schema 就够。
 
+### 2.17 拦截名单清到只剩一条，其余改成自己挂（2026-10-24）
+
+起因是核对 `present` 时发现：`tool-surface` 的前缀名单从来没真的挡到过它——它是各内置 preset
+自己挂的 agent 层工具，而 `sweep()` 读的是不带 scope 的全局视图。顺着这条线索把整份名单核了
+一遍。
+
+**核对方法。** `dsh --profile web --dump-config` 打出合成后的树（`desktop` 被 Electron 独占、
+不给 dump，但它自己的 patch 是文件，可以直接读）。结果是：web/desktop 里 base 层的模型可见
+工具行全是 `disabled: true`——`tool-bash` / `tool-pwsh` / `tool-fs` / `tool-fs-search` /
+`tool-skill` / `tool-jobs` / `tool-subagent*` / `tool-workflow` / `tool-todo` / `tool-goal` /
+`tool-web` / `tool-plugin-manager`。模型能看见的工具由各 agent preset 自己挂。
+
+逐项结果：
+
+| 拦截项 | 提供者 | 全局可见 | 拦截生效 |
+|---|---|---|---|
+| `working_directory` | `dsh-tool-working-directory` | 是 | **是** |
+| goal 三件套 | `dsh-tool-goal` | 否 | 空转 |
+| `workflow` | `dsh-tool-workflow` | 否 | 空转 |
+| `plugin_manager` | `dsh-plugin-manager/tools` | 否 | 空转 |
+| `schedule_*` | `dsh-tool-schedule` | 否 | 空转 |
+| `cordis_inspect_*` | `dsh-tool-cordis` | 否（宿主那行只注册 providers） | 空转 |
+| `load_workspace_dependencies` | `dsh-tool-workspace-dependencies` | 否（这个包在 web/desktop 里没挂） | 空转 |
+
+**处置。** 名单只剩 `working_directory`，`EXCLUDED_PATTERNS` 清空；六类空转项改成由本 preset
+自己挂，全部**不进** `defer`：第一轮被引导相位挡住，晋级之后直接出现在工具表里。`goal` /
+`schedule_*` / `cordis_inspect_*` 各加一行；`workflow` 照 `standard` preset 的写法单开一个
+`isolate: workflowEngine` 组，引擎与工具放在一起，否则 `tool-workflow` 的 inject 永远等不到；
+`plugin_manager` 在官方 `standard` 里是 `disabled: true`，这里主动打开。
+
+**`load_workspace_dependencies` 是两头空的幽灵。** 它同时出现在拦截名单和 `defer` 名单里，
+而这个包在 web/desktop 里根本没挂：拦截挡不到东西，`tool_search` 的描述里却又列着它，注定
+搜不到。已从两处一起删掉。`defer` 其余 18 个名字逐个核对过，都能落到本 preset 挂的插件行上。
+
+**两条要记住的代价。** `goal` 一旦建起来，宿主层的 `dsh-goal-round-driver` 会自动续跑，最多
+40 轮——这是行为变化，不是工具表变化。`plugin_manager` 让模型能改本 profile 的插件配置。
+两者在 `cordis.patch.yml` 里各占一行，删掉即回退。
+
 ---
 
 ## 三、两者的关系

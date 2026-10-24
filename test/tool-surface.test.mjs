@@ -43,20 +43,22 @@ function harness({ schemas = [], restrictFails = () => undefined } = {}) {
 	return { ctx, state, denied, listener: (name) => listeners.get(name)?.[0] }
 }
 
-test('挂载时挡掉名单里的宿主工具', () => {
+test('挂载时只挡 working_directory，其余宿主工具不碰', () => {
 	const stderr = captureStderr()
 	try {
 		const { ctx, denied } = harness({
 			schemas: [
 				{ name: 'read' },
-				{ name: 'workflow' },
 				{ name: 'working_directory' },
+				// 下面这些在 web/desktop 里宿主层本来就是 disabled，模型看不见它们靠的是
+				// 「没人挂」；本 preset 自己挂之后也不该再挡。
+				{ name: 'workflow' },
 				{ name: 'plugin_manager' },
 				{ name: 'present' },
+				{ name: 'create_goal' },
 				{ name: 'schedule_create' },
 				{ name: 'cordis_inspect_list' },
-				// free-search 的四个检索工具不在这里挡：它们交给 tool-search 延迟，
-				// 挡掉会连取回的路一起断掉。
+				// free-search 的四个检索工具交给 tool-search 延迟，挡掉会连取回的路一起断。
 				{ name: 'advanced_search' },
 				{ name: 'multi_search' },
 				{ name: 'platform_search' },
@@ -64,18 +66,21 @@ test('挂载时挡掉名单里的宿主工具', () => {
 			],
 		})
 		apply(ctx)
-		assert.deepEqual(denied.sort(), [
-			'cordis_inspect_list',
-			'plugin_manager',
-			'schedule_create',
+		assert.deepEqual(denied, ['working_directory'])
+		for (const name of [
 			'workflow',
-			'working_directory',
-		])
-		for (const name of ['advanced_search', 'multi_search', 'platform_search', 'free_search_test']) {
-			assert.equal(denied.includes(name), false, `${name} 应该留给 tool-search 延迟`)
+			'plugin_manager',
+			'present',
+			'create_goal',
+			'schedule_create',
+			'cordis_inspect_list',
+			'advanced_search',
+			'multi_search',
+			'platform_search',
+			'free_search_test',
+		]) {
+			assert.equal(denied.includes(name), false, `${name} 不该被挡`)
 		}
-		// present 和上面四个同理：挡住就搜不到 schema，交付这条路一起断
-		assert.equal(denied.includes('present'), false, 'present 应该留给 tool-search 延迟')
 		assert.match(stderr.lines.join('\n'), /restrict at mount:/)
 	} finally {
 		stderr.restore()
@@ -86,12 +91,12 @@ test('scoped 工具抛 unknown global tool 时保留，不重试', () => {
 	const stderr = captureStderr()
 	try {
 		const { ctx, denied } = harness({
-			schemas: [{ name: 'workflow' }, { name: 'schedule_create' }],
-			restrictFails: (name) => (name === 'schedule_create' ? 'unknown global tool "schedule_create"' : undefined),
+			schemas: [{ name: 'working_directory' }],
+			restrictFails: (name) => (name === 'working_directory' ? 'unknown global tool "working_directory"' : undefined),
 		})
 		apply(ctx)
-		assert.deepEqual(denied, ['workflow'])
-		assert.match(stderr.lines.join('\n'), /scoped, kept schedule_create/)
+		assert.deepEqual(denied, [])
+		assert.match(stderr.lines.join('\n'), /scoped, kept working_directory/)
 	} finally {
 		stderr.restore()
 	}
@@ -105,7 +110,7 @@ test('挂载时拿不到工具表，则 pre-step 补扫一次', () => {
 		assert.deepEqual(denied, [])
 		assert.match(stderr.lines.join('\n'), /tool list unavailable/)
 
-		state.schemas = [{ name: 'workflow' }, { name: 'read' }]
+		state.schemas = [{ name: 'working_directory' }, { name: 'read' }]
 		const preStep = listener('agent/pre-step')
 		assert.equal(typeof preStep, 'function')
 		let continued = false
@@ -113,7 +118,7 @@ test('挂载时拿不到工具表，则 pre-step 补扫一次', () => {
 			continued = true
 		})
 		assert.equal(continued, true, 'pre-step 必须继续往下走')
-		assert.deepEqual(denied, ['workflow'])
+		assert.deepEqual(denied, ['working_directory'])
 		assert.match(stderr.lines.join('\n'), /restrict at pre-step:/)
 	} finally {
 		stderr.restore()
