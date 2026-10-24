@@ -430,9 +430,9 @@ auto: boolean                     // true
 - `failOnStartupError=false`（默认）意味着 server 起不来时 harness 照常启动、工具不出现，
   只在日志里留一条错误。排查「工具怎么突然没了」先看这里。
 - 工具集会在 server 重连/通知时整体换代；冲突的更新被整体拒绝，不会留下半个工具集。
-- 结论：这个包没有「让 MCP 变小」的 config 手段。几十上百个工具要省，只能靠
-  `lib/tool-search.js` 的 `deferPatterns: ['mcp__<server>__*']` 把它们从装配里摘掉，
-  见仓库 README 的「工具延迟」一节。
+- 结论：这个包没有「让 MCP 变小」的 config 手段。几十上百个工具要省，只能在装配层摘掉
+  （本仓库的 `main` 分支用 `lib/tool-search.js` 的 `deferPatterns: ['mcp__<server>__*']`
+  做过这件事，当前分支不采用）。
 
 ---
 
@@ -547,4 +547,5 @@ diff 只进 presentation meta（`computeHunkDiffs` → UI 卡片），不进模�
 - 能靠 config 真正「减工具」的只有 `tool-fs`（4 个开关）和 `tool-web`（2 个开关）；`tool-subagent` 靠实例数/改名间接控制；`mcp-client` 连这个都做不到，它没有本地工具面。
 - 必须写新插件的目标共 5 项：① 改其余包的 description；② 改参数名/参数说明/enum 文案；③ 工具改名成 Read/Edit/Bash；④ `edit` 输出 unified diff；⑤ 拆 fs-search/jobs 的内部工具。
 - `readLimit` 是例外：它已经能实现「read 硬截断到 N 行」，不要再为这个写插件。
-- MCP 的「工具太多」也不在 config 能力范围内，只能在装配层延迟——这正是本仓库 `tool-search` 存在的理由。
+- MCP 的「工具太多」也不在 config 能力范围内，只能在装配层延迟。本仓库当前分支不采用延迟，
+  工具面照抄 `standard`。

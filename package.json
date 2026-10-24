@@ -2,7 +2,7 @@
   "name": "dsh-claude-preset",
   "version": "1.0.0",
   "private": true,
-  "description": "Claude Code 会话行为复刻 preset for DeepSeek Harness: ported system prompt (doing tasks / executing actions with care / using your tools / tone and style / output efficiency) over Claude Code's tool surface.",
+  "description": "Claude Code 会话行为复刻 preset for DeepSeek Harness: ported system prompt (doing tasks / executing actions with care / using your tools / tone and style / output efficiency) plus Claude Code's compaction checkpoint structure, over the standard preset's unchanged tool surface.",
   "license": "MIT",
   "type": "module",
   "scripts": {

@@ -16,21 +16,18 @@
 #      采纳的选项）、代码风格跟随周边（注释密度、命名、惯用法）。两条都放在
 #      # Doing tasks 里，与「不加投机抽象」相邻，让模型在一次阅读里拿到同一类约束。
 #
-# 刻意不做的两件事，以及原因：
+# 刻意不做的一件事，以及原因：
 #   - persona.complete 保持 false。设为 true 会让这一段成为唯一 system prompt，
 #     同时丢掉 AGENTS.md 全局规则、技能目录和运行时上下文（当前工作目录、时间）。
 #     Claude Code 自己也会读 CLAUDE.md，所以保留项目指令更接近它的真实行为。
-#   - 不挂 workflow / goal / schedule / present。这四样在 Claude Code 里都有对应物：
-#     Workflow 工具、/goal 命令加 Stop hook 判官、CronCreate/CronList/ScheduleWakeup、
-#     SendUserFile，所以"CC 没有这些工具"不成立。真正的理由是两条：一是那次会话主力
-#     工具只有 Bash/Edit/Read/Grep/Write/Glob 六个，把这四样收起来才不会给出用不上
-#     的诱导；二是 DSH 的同名能力语义不同——goal 是自动续跑（最多 40 轮），
-#     workflow 走 PTC 编排，挂上会改变行为而不是复刻行为。
-#     计划模式保留（对应 EnterPlanMode/ExitPlanMode），自动压缩保留（CC 也自动压缩）。
 #
-# 已知差异：DSH 没有 NotebookEdit 的对应工具。宿主层多出来的全局工具由
-# lib/tool-surface.js 在挂载时逐个挡掉；它之后再注册的工具（桌面端的
-# load_workspace_dependencies）会留在工具表里，这是刻意的取舍，理由见该文件开头。
+# 工具面：与官方 standard preset 一致，只保留 persona 与压缩摘要两处改动。
+# 不延迟、不拦截、不换表——模型从头到尾看见同一张表，一次会话只有一条
+# request/header。挂哪些行、每行怎么配都照抄 standard，唯一多出来的是压缩组里的
+# compaction-claude-instruction。standard 里 disabled: true 的两行
+# （dsh-plugin-manager/tools、dsh-plugin-market/tools）这里同样不挂。
+#
+# 已知差异：DSH 没有 NotebookEdit 的对应工具；Read 对 PDF 的支持 DSH 没有。
 - insert:
     - id: preset-claude-code
       name: '@deepseek-ai/dsh-agent-preset'
@@ -143,30 +140,23 @@
             name: '@deepseek-ai/dsh-tool-fs-search'
             config:
               sampleOverCapGlobResults: false
-          # 引导相位的第二个工具。dsh-TUI 那条首轮锚定的实测用的是 Minimal 的
-          # bash + str_replace_editor 这一对；官方 0.2.1 的 minimal 已经不含编辑器
-          # （自 0.1.3-alpha.2 起是 opt-in），所以这里自己挂一行补齐那一对的形状。
-          # 稳态不放它：名字列在 tool-search 的 defer 末尾，第一次工具调用之后收起来，
-          # 真要用的时候由 tool_search 取回。编辑器走宿主的 fs 与 sandboxPolicy。
-          - id: tool-str-replace-editor
-            name: '@deepseek-ai/dsh-tool-str-replace-editor'
-            config:
-              maxOutputChars: 16000
           - id: tool-jobs
             name: '@deepseek-ai/dsh-tool-jobs'
+          # 定时任务：schedule_create / schedule_list / schedule_update / schedule_delete，
+          # 对应 Claude Code 的 CronCreate / CronList / ScheduleWakeup。
+          # 服务 dsh-schedule 在宿主层，插件只 inject tools。
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
-          # 技能目录：每个 skill 的名字加截断后的描述，一段进历史、跟着每次请求走。
-          # 实测 28 个 skill 合计 8,966 字节，其中描述占 85%（名字只有 419）。默认
-          # 500 字的上限正好把最长的那几条卡在 500，而它们长在末尾——"什么时候用"往往
-          # 写在最后。描述第一句的长度中位数 63、p90 138，所以 120 能保住绝大多数条目
-          # 的第一句（j-space 那种 498 字的长句会被截）。
-          # 剩下约 6.1KB，比默认省 2.8KB/请求。再想省就把这个数压到 3，只留名字
-          # （约 1.3KB）；那一步的代价是模型只能按名字认技能。
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
-            config:
-              catalogDescriptionMaxLength: 120
+          # /goal 斜杠命令。标准 preset 里它和 tool-goal 两行都在：一个给用户敲，
+          # 一个给模型调，这里照抄。
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
           - id: planning
             name: cordis:group
             group: true
@@ -197,12 +187,6 @@
             config:
               - id: compaction-basic
                 name: '@deepseek-ai/dsh-compaction-basic'
-              # 摘要结构扩展：补 All User Messages / Pending Tasks 两段。
-              # 不替换 compaction-basic，只在 ctx.llm.stream 上按
-              # purpose === "compaction" 换掉它追加的那条指令，
-              # 因此自动压缩、/compact、溢出恢复三条入口都覆盖到。
-              - id: compaction-claude-instruction
-                name: 'dsh-claude-preset/lib/compaction-claude.js'
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'
               - id: tool-result-pruner
@@ -211,11 +195,20 @@
                   thresholdChars: 8192
                   headChars: 4096
                   tailChars: 1024
+              # 摘要结构扩展：补 All User Messages / Pending Tasks 两段。
+              # 不替换 compaction-basic，只在 ctx.llm.stream 上按
+              # purpose === "compaction" 换掉它追加的那条指令，
+              # 因此自动压缩、/compact、溢出恢复三条入口都覆盖到。
+              # 排在最后：这一组除它之外与 standard 逐行一致，方便对照。
+              - id: compaction-claude-instruction
+                name: 'dsh-claude-preset/lib/compaction-claude.js'
           # Claude Code 的 Task/Agent：spawn 一个新子代理，或用 fork 继承当前对话。
           # 控制工具对应它的 TaskOutput / TaskStop。
           - id: delegation
             name: cordis:group
             group: true
+            isolate:
+              workflowEngine: true
             config:
               - id: tool-subagent-control
                 name: '@deepseek-ai/dsh-tool-subagent-control'
@@ -226,11 +219,21 @@
                 config:
                   provider: spawn
                   toolName: subagent
+                  # 打开后才注册 list_subagent_models，并给 subagent 的 schema 补上
+                  # 选模型的那段说明。standard 里就是 true，这里照抄。
+                  modelSelectionSettings: true
               - id: tool-subagent-fork
                 name: '@deepseek-ai/dsh-tool-subagent'
                 config:
                   provider: fork
                   toolName: subagent_fork
+              # 工作流编排：引擎与工具必须在同一个 realm 里，所以和委派同组。
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
           - id: tool-ask-user
             name: '@deepseek-ai/dsh-tool-ask-user'
           - id: tool-todo
@@ -246,115 +249,7 @@
               fetch: true
               searchTimeoutMs: 60000
           # 交付文件：present 把已经存在的文件做成用户可点开的卡片，适合 Office 文档、
-          # 表格、幻灯片。Claude Code 里没有这个工具（对应的是它的 SendUserFile），
-          # 所以按「用得少」处理：名字在下面的 defer 名单里，稳态不占工具表，
-          # 需要交付时用 tool_search 取回再调。它 inject 的四个服务 tools / fs /
-          # sessionProjections / workingDirectory 都在宿主层，本 preset 能解析。
-          # 注意 tool-surface 的拦截名单里没有它：那是给宿主全局工具用的，
-          # 这里是本 preset 自己挂的，挡住了就连取回的路一起断。
+          # 表格、幻灯片。Claude Code 里对应的是它的 SendUserFile。它 inject 的四个服务
+          # tools / fs / sessionProjections / workingDirectory 都在宿主层，本 preset 能解析。
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
-          # 宿主层把这些行设成了 disabled: true，模型看不见它们不是被拦截，是没人挂。
-          # 这里按需挂上，三种都不进 defer：第一轮由引导相位挡住（只留 shell 加编辑器），
-          # 晋级之后直接出现在工具表里。
-          #
-          # 定时任务：schedule_create / schedule_list / schedule_update / schedule_delete，
-          # 对应 Claude Code 的 CronCreate / CronList / ScheduleWakeup。
-          # 服务 dsh-schedule 在宿主层，插件只 inject tools。
-          - id: tool-schedule
-            name: '@deepseek-ai/dsh-tool-schedule'
-          # 目标：create_goal / get_goal / update_goal。
-          # 注意 dsh-goal-round-driver 在宿主层是开着的，所以目标一旦建立会自动续跑
-          # （最多 40 轮）——这是行为变化，不是工具表变化。
-          - id: tool-goal
-            name: '@deepseek-ai/dsh-tool-goal'
-          # 运行时检查：cordis_inspect_list / cordis_inspect_query / cordis_inspect_self。
-          # 宿主那行 dsh-tool-cordis/host 只注册 providers，工具要由 preset 自己挂。
-          - id: tool-cordis
-            name: '@deepseek-ai/dsh-tool-cordis'
-          # 插件管理：查、装、停本 profile 的插件。官方 standard preset 里这一行是
-          # disabled: true，这里打开——它让模型能改本 profile 的插件配置，权限不小。
-          - id: tool-plugin-manager
-            name: '@deepseek-ai/dsh-plugin-manager/tools'
-          # 工作流编排：需要同一个 realm 里有 workflowEngine 提供者，所以照
-          # standard preset 的写法单开一个 isolate 组，引擎与工具放在一起。
-          - id: workflow
-            name: cordis:group
-            group: true
-            isolate:
-              workflowEngine: true
-            config:
-              - id: workflow-ptc
-                name: '@deepseek-ai/dsh-workflow-ptc'
-                config:
-                  provider: spawn
-              - id: tool-workflow
-                name: '@deepseek-ai/dsh-tool-workflow'
-          # 延迟加载的两半（Step 1 + Step 2）：装配时从工具表里摘掉 config.defer 指定的工具，
-          # 同时注册 tool_search 作为找回入口。
-          # 摘掉只影响模型看见什么，不影响执行：执行从 registry 解析，不看装配结果，
-          # 所以搜索拿到 schema 之后按名字直接调用即可，不需要包装工具。
-          # 两半同生共死：tool_search 注册失败时整层不启用，免得工具被摘掉又找不回来。
-          #
-          # 名单分两类：
-          # - defer：精确名字。挑「用得少」的，一旦被延迟，首次使用要多花一次 tool_search；
-          #   高频的（read / edit / pwsh / grep / web_search）一律常驻。
-          #   系统提示点名要求使用的（todo_write）也必须常驻：实测模型手边有替代品时，
-          #   宁可拿 pwsh 凑合，也不会为它多花一次 tool_search（见 docs/deferred-tools-gaps.md 2.12）。
-          #   free-search 的四个检索工具（advanced_search / multi_search / platform_search /
-          #   free_search_test，合计 2,984 字节）在这里延迟，不在 tool-surface 的拦截名单里：
-          #   web_search 的描述末尾点着这四个名字，模型想换引擎时会去搜；挡掉就是空搜一次，
-          #   延迟才是它真正的用法。实测见 2.14。
-          #   present 同理：交付文件是低频动作，工具本身不便宜，延迟之后稳态零成本。
-          # - deferPatterns：按类。MCP 工具名是 mcp__<server>__<tool>，数量随 server 变，
-          #   只能按模式表达。本 preset 当前没有 MCP server，这条是给将来接 MCP 留的；
-          #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
-          # 要关掉：删掉 config，或把 defer / deferPatterns 都清空。
-          # 作用域：监听器和工具都只对本 preset 代际的会话生效（2.8 已实测）。
-          #
-          # 引导相位（bootstrapTools）：第一次请求只暴露这几个工具，其余全摘，
-          # 连 tool_search 自己也不留——那一轮没有东西可搜。等会话落下第一次持久的
-          # 工具调用（tool/call）之后，晋升成上面那套延迟表。
-          # 方向是刻意的：模型按第一轮看到的工具目录决定接下来怎么干活，所以要给的是
-          # 最小的那面，不是全表。dsh-TUI 在 V4 Pro 上测过（见 docs/deferred-tools-gaps.md
-          # 2.14）：Minimal 那对 bash + str_replace_editor 首轮 5/5 落在 Minimal 轨迹，
-          # 而 standard 系的 schema 11/11 掉回 standard 式行为。
-          # shell 按平台二选一，和官方 minimal preset 的写法一致：POSIX 是 bash，
-          # Windows 是 pwsh。官方 minimal 在 0.2.1 里用的是持久 shell，这里用本 preset
-          # 已挂的普通 shell，名字相同，schema 略窄。
-          # bootstrapSuppressContext：首步注入的技能目录与 AGENTS.md 摘要也摘掉。
-          # dsh-TUI 记录的是技能目录在场时锚定 0/9，剥掉后同一请求约 81%。
-          # 卸这两段只发生首轮，晋级后照常注入。
-          # 子代理不走这个相位：被派出去时开局就要 read / grep / web_search，压成两个
-          # 工具换不到锚定收益——锚定说的是顶层会话怎么开局。判定按 delegationDepth > 0
-          # （会话头或运行时 options，取较大的那个），对齐参考实现的 includeSubagents
-          # 默认 false。
-          # 常驻、但不在引导集合里的工具（例如宿主全局的 working_directory）首轮同样被挡住，
-          # 晋级之后才出现——白名单自动覆盖这一类，不需要单独配置。
-          - id: tool-search
-            name: 'dsh-claude-preset/lib/tool-search.js'
-            config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test', 'str_replace_editor', 'present']
-              deferPatterns: ['mcp__*']
-              # shell 按平台二选一，与官方 minimal preset 的写法一致：POSIX 给 bash，
-              # Windows 给 pwsh。行内写三元表达式会被 YAML 当成映射键，所以用折叠块。
-              bootstrapTools: !!js >-
-                process.platform === 'win32' ? ['pwsh', 'str_replace_editor'] : ['bash', 'str_replace_editor']
-              bootstrapSuppressContext: ['skill-catalog', 'agent-instructions']
-          # 工具表审计 + 缓存代价观测。不再拦截任何工具。
-          #
-          # 早先这里挡过一批宿主工具，2026-10-24 全清：web/desktop 里宿主层本来就把那些行
-          # 设成 disabled，模型看不见 goal / workflow / schedule / plugin_manager /
-          # cordis_inspect 靠的是「没人挂」，不是「被挡住」；需要的能力改成上面自己挂。
-          # 最后一条 working_directory 也放开了：它由宿主的 dsh-tool-working-directory
-          # 提供，不在 defer 名单里，所以首轮被引导相位挡住、晋级之后常驻工具表。
-          #
-          # 要重新挡一个工具：ctx.tools.restrict({ deny: [name] })，只能挡全局层的名字，
-          # 且要在第一次装配之前调——晚一步就是一次工具表变化加一次全前缀重建（实测
-          # 7,090 input token，约等于 7 个普通轮次）。被挡的名字也拿不回 schema，
-          # 所以延迟与拦截互斥。细节写在 lib/tool-surface.js 的文件头。
-          #
-          # 审计行只在 request/header 变化时输出：工具数、总字节、按 4 字符/token 粗估
-          # 的 token、这次相比上次增删了谁。工具块变一次，缓存就从那个 token 起失效一次。
-          - id: tool-surface
-            name: 'dsh-claude-preset/lib/tool-surface.js'
