@@ -111,6 +111,17 @@ CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_in
   import 慢，只注册一次就可能被别人套在外面——`dsh-time-context` 也 prepend、也在 `next()`
   之后追加消息。所以第一次真正处于引导相位的装配之后再 prepend 一次，抢回链首。
 
+三次迭代的首步注入（同一个工作区，`claude-code` preset，每次重启后开新会话量）：
+
+| 版本 | 第 1 步注入 | 第 2 步才出现 |
+|---|---|---|
+| 按名字点名 | `time-context` 262 B + `runtime-context` 662 B | AGENTS.md 摘要、技能目录 |
+| 改按路径剥 | `time-context` 262 B + `runtime-context` 179 B | 上面两条 |
+| 再加抢链首 | `runtime-context` 179 B（只剩 required 的 cwd） | 上面两条 + `time-context` 253 B + 完整 runtime-context 699 B |
+
+会话 `1315c7ae` 的第 1 步只有 system prompt、用户消息和那条 179 B 的 cwd；两条
+`request/header` 是 2 个工具 6,600 B → 23 个工具 27,416 B，与改之前逐字节相同。
+
 代价是首轮模型看不到沙箱与审批策略（约 480 字节，cwd 仍在）。它手上就是 shell，不接受就
 把 `bootstrapSuppressRuntimeContext` 设 `false`，只保留步骤路径那条。
 
