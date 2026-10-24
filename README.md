@@ -1,40 +1,36 @@
 # Claude Code preset for DeepSeek Harness
 
-把 Claude Code 的会话行为复刻成 DeepSeek Harness（DSH）的 agent preset，id 是 `claude-code`。
+把 Claude Code 的会话行为复刻成 DeepSeek Harness（DSH）的 agent preset。
 
 依据是 [NanmiCoder/cc-haha](https://github.com/NanmiCoder/cc-haha) 里整理的 Claude Code 会话装配代码：
-`src/constants/prompts.ts` 那套按固定顺序拼装的 system prompt，以及压缩检查点的摘要结构。
+`src/constants/prompts.ts` 那套按固定顺序拼装的 system prompt、工具清单，以及压缩检查点的摘要结构。
 
-## 只改两处
+## 两个 preset
 
-这个分支与官方 `standard` preset 的差别只有下面两行：
+| id | 工具面 | 改动 |
+|---|---|---|
+| `claude-code` | 换。延迟加载 + 引导相位 + 工具面收敛 | 提示词、工具面、压缩摘要 |
+| `claude-code-prompt` | 不换，行列表照抄 `standard` | 只改提示词与压缩摘要 |
+
+两者提示词是同一份，压缩摘要也是同一份（`lib/compaction-claude.js` 认两个 id）。
+差别只在工具面：前者会摘工具、会换表；后者一次会话只有一条 `request/header`，
+工具表与 `standard` 逐字节相同。
+
+下面先说 `claude-code`，`claude-code-prompt` 的细节见[最后一节](#claude-code-prompt只换提示词)。
+
+## 它由四部分组成
 
 | 部分 | 做法 | 文件 |
 |---|---|---|
-| 系统提示词 | 照抄 Claude Code 的静态段（Intro / System / Doing tasks / Executing actions with care / Using your tools / Tone and style / Output efficiency），只把工具名换成 DSH 的，文件引用改成 DSH 渲染得出来的写法 | `cordis.patch.yml` |
+| 系统提示词 | 照抄静态段（Intro / System / Doing tasks / Executing actions with care / Using your tools / Tone and style / Output efficiency），只把工具名换成 DSH 的，文件引用改成 DSH 渲染得出来的写法 | `cordis.patch.yml` |
+| 工具面 | 只挂 Claude Code 有对应物的工具；宿主层多出来的工具在 preset 挂载时逐个 `restrict` 挡掉 | `lib/tool-surface.js` |
+| 工具延迟 | 装配时把点名的工具从工具表摘掉，模型看不见但按名字仍可调用；`tool_search` 负责把 schema 取回来 | `lib/tool-search.js` |
 | 压缩摘要 | 把 compaction 的摘要指令换成 Claude Code 的检查点结构：新增 `## All User Messages`，把 `## Pending Jobs` 改名 `## Pending Tasks` 并扩写 | `lib/compaction-claude.js` |
-
-工具面不在这里决定：挂哪些行、每行怎么配，全部照抄 `standard`。不延迟加载、不拦截工具、
-不在会话中换表——模型从头到尾看见同一张表，一次会话只有一条 `request/header`。
 
 `persona.complete` 保持 `false`：Claude Code 自己也读 CLAUDE.md，所以 AGENTS.md 全局规则、技能目录、
 运行时上下文（工作目录、时间）都保留，这比把 system prompt 裁成单独一段更接近它的真实行为。
 
-## 与 standard 的行集合对照
-
-`cordis.patch.yml` 里的行 id 直接对着 `dsh --profile <profile> --dump-config` 里的 `preset-standard`
-逐行比过：
-
-- **少两行**：`dsh-plugin-manager/tools`、`dsh-plugin-market/tools`。它们在 standard 里就是
-  `disabled: true`，挂不挂都不产生工具，所以没有抄。
-- **多一行**：压缩组里的 `compaction-claude-instruction`，就是上面那处压缩摘要改动。
-- **其余完全相同**：行 id、嵌套分组（`planning` / `compaction` / `delegation`）、isolate 声明、
-  每行的 `config`（`sampleOverCapGlobResults: false`、`allowParallelInProgress: true`、
-  `fetch: true`、`modelSelectionSettings: true`、裁剪阈值 8192/4096/1024 等）全部一样。
-
 ## 工具对照
-
-只作名字映射参考。同一个 Claude Code 概念在 DSH 这边叫什么：
 
 | Claude Code | 本 preset |
 |---|---|
@@ -48,37 +44,186 @@
 | Skill | `skill` |
 | AskUserQuestion | `ask_user_question` |
 | EnterPlanMode / ExitPlanMode | 计划模式 + `exit_plan_mode` |
-| SendUserFile | `present` |
-| CronCreate / CronList / ScheduleWakeup | `schedule_create` / `schedule_list` / `schedule_update`、`schedule_delete` |
-| 后台任务续跑 | `create_goal` / `get_goal` / `update_goal` 加 `/goal` 命令 |
 | 自动压缩 | `compaction-basic` + `/compact` |
 
-## 系统提示词的四处改写
+`present`、`goal` 三件套、`schedule_*`、`workflow`、`cordis_inspect_*`、`plugin_manager`
+都是后补挂上的。前五个在 Claude Code 里各有对应物（SendUserFile、`/goal` + Stop hook、
+CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_inspect_*` 没有对应物，
+是纯 DSH 能力，按你的要求一起开了。
 
-1. 工具名换成 DSH 的名字（`read` / `write` / `edit` / `glob` / `grep` / `todo_write` /
-   `ask_user_question` / `subagent` / `skill` / `exit_plan_mode` / 平台 shell 工具）。
-2. 删掉 Claude 专属内容：`/help` 与反馈渠道、模型家族与知识截止日期、`!` 前缀跑命令、
-   Anthropic 内部 A/B 段、Output Style 段。
-3. 文件引用改成 DSH 的写法（路径放行内代码、行号写在代码串外面），因为裸的 `file:line`
-   在 DSH 的会话界面里不会变成可点链接。
-4. 补两条不在 cc-haha 静态段里的行为准则，按 2026-10-20 那次会话（CLI 2.1.299）实际下发的
-   文本：信息足够就行动（不复述已知事实、不重议已决事项、不给不会采纳的选项）、代码风格
-   跟随周边（注释密度、命名、惯用法）。两条都放在 `# Doing tasks` 里。
+除 `present` 放进延迟名单外，其余都在工具表里（不在 `defer`），因此第一轮被引导相位挡住，
+第一次工具调用之后直接可见。两点代价要记住：
 
-## 压缩摘要的两处改写
+- `goal` 一旦建起来，宿主层的 `dsh-goal-round-driver` 会自动续跑，最多 40 轮——这是行为
+  变化，不是工具表变化。
+- `plugin_manager` 能让模型改本 profile 的插件配置，官方 `standard` preset 里这一行是
+  `disabled: true`，这里主动打开了。
 
-上游 `compaction-basic` 的摘要指令是模块内常量、没有导出，插件解析不到那个包，所以接在
-`ctx.llm.stream` 上：只在 `purpose === 'compaction'` 时把最后那条指令换成扩展版，其它请求
-原样透传——不进内容、不改 envelope、不动回放前缀。
+`working_directory` 不在上面这一串里：它由宿主层的 `dsh-tool-working-directory` 提供，
+本 preset 只负责不挡它。首轮看不见（引导相位只留两个工具），晋级之后常驻。
 
-1. 新增 `## All User Messages`：按顺序列出非工具结果的用户消息，指令、纠正、范围调整和
-   验收标准保留原文。
-2. `## Pending Jobs` 改名 `## Pending Tasks` 并扩写：未完成的显式请求映射到它满足的验收
-   标准、标出缺证据的项、带上还在跑的后台作业。名字跟 Claude Code 自己的压缩提示一致
-   （它的第 7 项就是 Pending Tasks）；这是有意改名，不是漏抄。
+## 工具面怎么收敛
 
-自动压缩、`/compact`、溢出恢复三条入口都走这里。补丁是进程级的，但每次压缩请求都按发起
-它的 agent 绑的 preset 判定一次，只改 `claude-code` 会话。
+不再收敛。`lib/tool-surface.js` 现在只做审计：`request/header` 一变就输出一行——工具数、
+工具块字节、按 4 字符/token 粗估的 token、这次相比上次增删了谁。工具块在请求最前面，任何
+字节变化都会让缓存从该 token 起失效，这行就是那次失效的凭证。
+
+```
+[tool-surface] baseline #1: <工具数> tools, <字节> bytes (~<tokens> tok est) | session <id>
+[tool-surface] change #2: ... | +glob | -skill | cache: reuse invalidated from the first changed tool token
+```
+
+这个文件早先负责挡住一批宿主工具，2026-10-24 全清：
+
+| 原拦截项 | 当时的真实情况 |
+|---|---|
+| goal 三件套、`workflow`、`plugin_manager`、`schedule_*`、`cordis_inspect*`、`load_workspace_dependencies` | 宿主层把这些行设成 `disabled: true`，模型看不见它们靠的是「没人挂」，拦截从来没生效过 |
+| `working_directory` | 唯一真正被挡的。现已放开，首轮被引导相位挡住，晋级之后常驻 |
+
+要重新挡一个工具，三条约束记在 `lib/tool-surface.js` 文件头：`restrict` 只认全局层的名字、
+必须在第一次装配之前调（晚一步就是一次全前缀重建）、被挡的名字拿不回 schema 所以和延迟互斥。
+
+## 工具延迟
+
+`lib/tool-search.js` 做两件事，两半同生共死：
+
+1. **摘工具**：每轮装配时把 `config.defer` 点名的工具从工具表里摘掉。摘掉只影响模型看见
+   什么：执行从 registry 解析（`dsh-tools` 的 `resolveExecution`），不看这份装配结果，
+   所以模型按名字调用照样能跑。
+2. **找回**：注册 `tool_search`，按名字或关键词查出这些工具的完整 JSON Schema，以
+   `<functions>` 块放进工具结果。拿到之后模型直接按名字调用，不需要包装工具。
+
+发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
+
+引导相位（`bootstrapTools`，本 preset 开着）：第一次请求只暴露 shell 加
+`str_replace_editor`，其余全摘，`tool_search` 自己也不留——这一轮没有东西可搜，留着只会
+误导。等这个会话落下第一次持久的工具调用、或者进到第 2 轮，之后才晋升成上面那套延迟表。
+只看工具调用会留一个洞：第 1 轮如果只回文字、一次工具都不调，窄表会一直留着，第 2 轮要
+读文件才会发现 `read`/`grep` 都不在表上。引导相位锚的是第一次请求，第 2 轮已经出了它的
+范围，所以轮次一到就退场。
+
+为什么：模型会用第一轮看见的工具目录锚定接下来怎么干活，所以要给的是**最小的那面**。方向
+别接反：dsh-TUI 在 V4 Pro 上测的是「Minimal 那对 5/5 落在 Minimal 轨迹，standard 系 schema
+11/11 掉回 standard 式行为」（见 [2.14](docs/deferred-tools-gaps.md)），给全表恰好是失败的
+那一侧。
+
+同一个相位还会剥掉首步注入的技能目录与 `AGENTS.md` 摘要（`bootstrapSuppressContext`）：它们
+是自动注入的用户消息，在场时会盖过工具面本身。晋级之后照常注入。
+
+shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`，Windows 是 `pwsh`。
+
+子代理不走这个相位。判定按 `delegationDepth > 0`（会话头与运行时 `options.subagentDepth`
+取较大者），子代理开局直接就是延迟表，也不剥上下文——它们被派出去时通常马上要
+`read`/`grep`/`web_search`。参考实现的 `includeSubagents` 也默认 false（他们自己那个 preset
+开成 true）。
+
+相位从会话事件重建，不是进程内状态：恢复会话时扫一次历史，压缩不重置。所以一个会话只会
+多这一条 `request/header`。
+
+名单分两类：
+
+- `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
+  `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、`subagent`、`glob`、
+  `skill`、`advanced_search`、`multi_search`、`platform_search`、`free_search_test`、
+  `str_replace_editor`、`present`
+- `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
+  数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
+
+`str_replace_editor` 是引导相位的第二个工具：只在这一轮出现，晋级后收起来，真要用时由
+`tool_search` 取回。dsh-TUI 那条实测的首轮工具对就是 shell 加它；官方 0.2.1 的 minimal 已经
+不含编辑器（自 0.1.3-alpha.2 起 opt-in），所以这里自己挂了一行。
+
+`present` 交付文件用：把已有文件做成用户可点开的卡片。Claude Code 里对应 SendUserFile，
+语义一致，所以挂上了；因为低频，放进延迟名单——模型要交付时先
+`tool_search select:present` 拿 schema，再按名字调用。
+
+`advanced_search`、`multi_search`、`platform_search`、`free_search_test` 这四个是 free-search
+的检索工具，合计 2,984 字节。它们原来在 `tool-surface` 的拦截名单里，结果是模型照 `web_search`
+描述末尾点的名字去搜，搜不到，白花一次往返（实测见 2.14）。现在改成延迟：平时不出现在表里，
+模型想换引擎时 `tool_search` 能搜到、拿到 schema 再调用。
+
+挑的原则：一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以高频的 `read`、`edit`、
+`pwsh`、`grep`、`web_search` 一律常驻。系统提示点名要求使用的工具（`todo_write`）同样常驻：
+实测模型手边有替代品时，宁可拿 `pwsh` 凑合，也不会为它多花一次往返。`tool_search` 的描述
+里会把名单全列出来，模型才知道有什么可查。要关掉就删掉 `config`。
+
+实测（真实会话）：
+
+- 名单 5 个：工具表 22 → 18，工具块 17,222 → 16,310 字节。模型 `select:web_fetch` 拿到
+  schema 后，下一轮直接调用 `web_fetch`——一个不在请求 `tools[]` 里的工具——执行成功。
+- 名单 9 个：工具表 22 → 14，工具块 13,391 字节。`/compact` 把 schema 压掉后，模型自己
+  重搜一次，拿到同一份 schema 再调用，照样成功。
+- 名单 14 个：工具表 22 → 9，工具块 9,925 字节。同一场里 `todo_write` 和 `glob` 没被搜出，
+  被 `pwsh` 替代了，所以 `todo_write` 已挪回常驻。
+- 名单 13 个：工具表 22 → 10，工具块 10,925 字节。一场 70 步、88 次调用的会话里工具表
+  一次没变（全场只有一条 `request/header`），延迟的 `subagent` 用了 4 次、`send_message`
+  用了 1 次，都是拿到 schema 之后按名字直接调用。
+- 相位打开后（2026-10-24）：一场 20 步、37 次调用的会话是两条 `request/header`——首轮
+  22 个工具、17,222 字节，之后 10 个、10,925 字节。这一场跑的是**接反**的那一版（首轮给
+  全表），现已翻成首轮最窄。可用的观察是：晋级那一刻整张表换掉，模型照样把被延迟的
+  `web_fetch` 搜出来用了 23 次，没有一次失败——切换本身不打断工作。
+- 掉头之后（2026-10-24，会话 `3d7c5f13`）：首轮 2 个工具、6,609 字节，晋级后 10 个、
+  11,000 字节，之后 34 次请求没再变。第 1 步只带 `user`/`runtime-context`/`time-context`
+  三条消息，技能目录和工作区指令都等到第 2 步才注入。首轮一句话就直接 `pwsh` 抓日志，
+  没有去找当轮不存在的 `read`/`edit`/`todo_write`。
+
+数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13、2.14。
+前四条是打开相位之前跑的，那时全场只有一条 `request/header`；第五、六条是打开之后跑的，
+第五条方向接反，第六条是掉头之后。
+
+注意这只在缓存的 0.1x 档位上省，**净收益 = 被延迟 schema 之和 − `tool_search` 的开销**，
+所以这套东西真正的回本点是 MCP 那种几万字符起步的工具包。
+
+搜索对 MCP 有两条专门处理：`select:<裸工具名>` 能选中 `mcp__<server>__<tool>`
+（重名就都给出来）；关键词按 `mcp__server__tool` 切段，`+rea` 这类必选词按整段比，
+不会被 `create` 里的 "rea" 误命中。
+
+为什么在装配处摘、而不是用 `deferLoading`：模型可见的 tools 由装配决定，而 `dsh-llm` 在
+路由没有 `toolUpdate` 能力时会把 `deferLoading` 剥掉、把工具全发出去。那条路在非 Anthropic
+路由上静默失效。装配层摘掉是路由无关的。
+
+作用域不用担心：监听器和工具都挂在 preset 自己的插件树上，只对本 preset 代际的会话生效，
+同进程里别的 preset 不受影响（实测见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.8）。
+
+## 技能目录
+
+`dsh-tool-skill` 会把每个 skill 的名字和截断后的描述拼成一段 `<system-reminder>` 塞进历史，
+从第一轮起就跟着每次请求走。本工作区 28 个 skill 合计 8,966 字节，描述占 7,543（85%），
+名字只有 419。
+
+配置里把 `catalogDescriptionMaxLength` 从默认 500 压到 120，目录降到约 6.1 KB。描述第一句的
+长度中位数 63 字、p90 138 字，120 保得住绝大多数条目的第一句——超过 120 的通常是末尾那串
+触发条件，而名字本身已经把话说清（`jenkins-auth`、`tracy-analysis`、`crash-fix`）。
+
+不加按需搜索的理由：技能用得很少，但用上的时候是一步到位。80 场会话、约 9,500 次工具调用里
+`skill` 只出现 11 次（0.12%），全部落在 seq 18–30，直接按目录点名，没有一次弯路。换成
+「先搜再取」会让这 11 次各多一步，而目录本身一行配置就能砍掉三成。评估过程见
+[docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.15。
+
+## claude-code-prompt：只换提示词
+
+行列表直接对着 `dsh --profile <profile> --dump-config` 里的 `preset-standard` 抄，与 standard
+的差异只有两处：
+
+- `persona.prefix`：Claude Code 的系统提示词。
+- 压缩组里多一行 `compaction-claude-instruction`。
+
+`standard` 里 `dsh-plugin-manager/tools` 与 `dsh-plugin-market/tools` 两行是 `disabled: true`，
+这里没有抄——挂不挂都不产生工具。其余行 id、嵌套分组、isolate 声明、每行 config
+（`sampleOverCapGlobResults`、`allowParallelInProgress`、`fetch`、`modelSelectionSettings`、
+裁剪阈值 8192/4096/1024）逐字段相同。
+
+实测（会话 `952ff385`，Messiah 代码复核，27 步）：
+
+| 项 | 值 |
+|---|---|
+| `request/header` | 1 条（`initial`） |
+| 工具数 / 字节 | 37 / 34,184，与同版本 standard 会话逐字节相同、名字顺序也相同 |
+| 缓存断点 | 0。每步 `cached` 约等于上一步整段 prompt，最大落差 122 token |
+| 调用 | 57 次，0 失败 |
+
+代价是首轮就带全表：首步 prompt 18,625 token，比 `claude-code` 的 2 工具首轮贵一倍多。
+换来的是全程一张表，没有换表抖动，也没有延迟加载那次 `tool_search` 往返。
 
 ## 安装
 
@@ -106,14 +251,14 @@
    dsh plugin --profile <profile> install
    ```
 
-4. 重启 DSH。新建会话时在 preset 列表里选 **Claude Code**；想设成默认，在 profile 的
-   `cordis.patch.yml` 里改 registry：
+4. 重启 DSH。新建会话时在 preset 列表里选 **Claude Code** 或 **Claude Code (prompt only)**；
+   想设成默认，在 profile 的 `cordis.patch.yml` 里改 registry：
 
    ```yaml
    - id: agent-preset-registry
      config:
        default: standard
-       selectedDefault: claude-code
+       selectedDefault: claude-code-prompt
    ```
 
 `selectedDefault` 是易变配置，进程重启后可能回到 `default`；要长期生效就改 `default`。
@@ -121,56 +266,63 @@
 ## 验证
 
 ```powershell
-# 1. 组合能否解析：输出里应出现 preset-claude-code 行
+# 1. 组合能否解析：输出里应出现 preset-claude-code 和 preset-claude-code-prompt 两行
 dsh --profile <profile> --dump-config | Select-String 'preset-claude-code'
 
-# 2. 隔离 profile 冒烟：应正常起会话、不报 agent-preset/invalid
+# 2. 隔离 profile 冒烟：应打印 restrict 行、不报 agent-preset/invalid
 $env:DSH_HOME = "$env:TEMP\dsh-smoke"
 dsh --profile <临时 profile> "reply ok"
 ```
 
-真实会话的核对点在会话日志的 `request/header` 事件：`data.header.tools` 就是模型当轮看到的
-工具表。工具面与 standard 一致意味着两件事：整个会话只有一条 `request/header`（`initial`），
-工具数与同版本 standard 会话相同。
+真实会话的核对点是会话日志里的 `request/header` 事件：`data.header.tools` 就是模型当轮看到的工具表。
+`claude-code` 应该两条（`initial` 加一次 `change`），`claude-code-prompt` 只有一条 `initial`。
 
 ## 测试
 
-`lib/compaction-claude.js` 有单测：指令替换、匹配失败时放行、按会话判定、引用计数。零依赖，
-用的是 Node 自带的 test runner：
+`lib/` 下三个插件的逻辑都有单测：装配改写、通配与裸名选取、工具面拒绝名单与补扫、
+压缩指令替换与引用计数。零依赖，用的是 Node 自带的 test runner：
 
 ```powershell
 node --test        # 或 pnpm test
 ```
 
 测试拿假 `ctx` 直接调用插件的 `apply()`，不启动 DSH；插件打到 stderr 的日志被收进断言里，
-所以跑起来是安静的。当前 7 项。
+所以跑起来是安静的。当前 22 项。
 
 ## 已知差异与限制
 
-- **preset 是 revision 级，不是会话级**。插件树按 preset 定义挂一次、所有会话共用。
+- **preset 是 revision 级，不是会话级**。插件树按 preset 定义挂一次、所有会话共用；挡住或放开
+  都作用于整个进程，直到重启或预设重载。
+- **不做延迟加载**。DSH 当前路由（pi-ai + openai-completions）没有会话中改工具的协议能力，
+  取回工具必然改工具表、必然整体失效前缀缓存。实测一次变化约等于 7 个普通轮次，回本要 15~20 轮。
+  设计与实测数据在 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md)。
 - **压缩摘要指令是整段替换**，不是拼接。上游改文案时这里要同步，否则会丢新版规则；
   匹配不到基础指令时原样放行，不会弄坏请求。上游的 `## Pending Jobs` 是被**有意改名**成
-  `## Pending Tasks` 的，升级后不要当成漏抄补回去。
+  `## Pending Tasks` 的（名字跟 Claude Code 的压缩提示一致），不是漏抄。
 - 包装 `ctx.llm.stream` 用引用计数：多个作用域或前后两版预设先后挂载时只包一次，
   最后一个卸载才还原，避免「新版先挂、旧版后卸」把补丁带走。
-- **压缩补丁是进程级的，但按会话判定**。`ctx.llm` 是宿主单例，补丁在 preset 挂载时（进程启动）
-  就装上；每次压缩请求都会按发起它的 agent 绑的 preset 判定一次，只改 `claude-code` 会话，
-  其它 preset 原样透传。判定不了时按旧行为处理并打一行 warn。
 - 没有 NotebookEdit 对应工具；`Read` 对 PDF 的支持 DSH 没有。
 - 权限提示不在 preset 里做，用 DSH 的 permission preset（`danger-full-access` 等）。
-- **只依赖 DSH 本体，不依赖任何第三方插件**。profile 里另外挂的插件不归 preset 管：它们的
-  工具照常出现在工具表里，自己往 system prompt 里加的说明也照常进提示词。核对方法见
-  [docs/dependencies.md](docs/dependencies.md)。
+- **压缩补丁是进程级的，但按会话判定**。`ctx.llm` 是宿主单例，补丁在 preset 挂载时（进程启动）
+  就装上；每次压缩请求都会按发起它的 agent 绑的 preset 判定一次，只改 `claude-code` 与
+  `claude-code-prompt` 的会话，其它 preset 原样透传。判定不了时按旧行为处理并打一行 warn。
+- **只依赖 DSH 本体，不依赖任何第三方插件**。profile 里另外挂的插件不归 preset 管：它们的工具在
+  `claude-code` 下会被挡掉（`claude-code-prompt` 不挡），但它们自己往 system prompt 里加的说明
+  照常进提示词。核对方法见 [docs/dependencies.md](docs/dependencies.md)。
 
 ## 目录
 
 ```
-cordis.patch.yml               preset 定义：提示词 + 插件行（照抄 standard）+ 压缩扩展行
+cordis.patch.yml               两个 preset 的定义：prompt + 插件行 + isolate 分组
 package.json                   bundle 清单（dsh.bundle.patch 指向 cordis.patch.yml）
+lib/tool-surface.js            工具面收敛 + 工具表审计
+lib/tool-search.js             工具延迟：装配时摘工具 + tool_search 找回
 lib/compaction-claude.js       压缩摘要结构扩展
-test/compaction-claude.test.mjs
+test/                          三个插件的单测（node --test，零依赖）
 docs/dependencies.md           依赖清单与校验结论
+docs/deferred-tools-gaps.md    延迟加载为什么放弃（含实测数据）
 docs/plugin-config-audit.md    DSH 各工具包的可配置项审计（19 个包）
+docs/archive/tool-search.js    废弃的 tool_search 实现，仅作设计留档
 docs/archive/request-probe.js  作用域探针（Step 0 用毕归档，可重新挂载）
 ```
 

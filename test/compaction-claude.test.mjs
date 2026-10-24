@@ -102,6 +102,13 @@ test('别的 preset 的会话保持原指令', () => {
 	assert.equal(calls.at(-1).messages[1].content[0].text, `${PREFIX} ...upstream text...`)
 })
 
+test('第二个 preset 的会话同样用这套摘要结构', () => {
+	const { llm, ctx, calls } = fakeRuntime({ presets: { 'session-1': 'claude-code-prompt' } })
+	apply(ctx)
+	llm.stream(compactionRequest('session-1'))
+	assert.match(calls.at(-1).messages[1].content[0].text, /## Pending Tasks/)
+})
+
 test('判定不了归属时沿用旧行为（仍然替换）', () => {
 	const { llm, ctx, calls } = fakeRuntime({ withRegistry: false })
 	apply(ctx)

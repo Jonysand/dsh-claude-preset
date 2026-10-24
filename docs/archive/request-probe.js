@@ -1,8 +1,8 @@
 /**
  * Step 0 探针（已归档）：确认 `system-prompt/assemble` 这类 waterfall 监听器会不会串到别的 preset。
  *
- * 结论：不会。同一个进程里两个 preset 同时跑，挂在本 preset 里的监听器只收到了本 preset
- * 的装配，standard 会话一行都没有（完整记录在 `main` 分支的 docs/deferred-tools-gaps.md 2.8）。
+ * 结论见 docs/deferred-tools-gaps.md 的 2.8：不会。同一个进程里两个 preset 同时跑，
+ * 挂在本 preset 里的监听器只收到了本 preset 的装配，standard 会话一行都没有。
  *
  * 再用的时候把它加回 cordis.patch.yml 的插件列表：
  *
