@@ -33,16 +33,23 @@
 | EnterPlanMode / ExitPlanMode | 计划模式 + `exit_plan_mode` |
 | 自动压缩 | `compaction-basic` + `/compact` |
 
-刻意不挂 `workflow`、`goal`、`schedule`、`present`。它们在 Claude Code 里有对应物
-（Workflow 工具、`/goal` 加 Stop hook、CronCreate、SendUserFile），但在 DSH 里语义不同：
-goal 会自动续跑最多 40 轮，workflow 走 PTC 编排，挂上会改变行为而不是复刻行为。
+刻意不挂 `workflow`、`goal`、`schedule`。它们在 Claude Code 里有对应物（Workflow 工具、
+`/goal` 加 Stop hook、CronCreate），但在 DSH 里语义不同：goal 会自动续跑最多 40 轮，
+workflow 走 PTC 编排，挂上会改变行为而不是复刻行为。
+
+`present` 是例外：它对应 Claude Code 的 SendUserFile，语义一致，所以挂上了。但交付文件是
+低频动作，名字放进延迟名单——稳态不占工具表，要交付时用 `tool_search` 取回再调。
 
 ## 工具面怎么收敛
 
 `lib/tool-surface.js` 的名单在文件顶部：`EXCLUDED_TOOLS` 是名字，`EXCLUDED_PATTERNS` 是前缀。
 挡的是这些：`create_goal` / `get_goal` / `update_goal`、`workflow`、`working_directory`、
-`plugin_manager`、free-search 的四个检索工具、`load_workspace_dependencies`，以及
-`cordis_inspect*`、`present`、`schedule_*`。
+`plugin_manager`、`load_workspace_dependencies`，以及 `cordis_inspect*`、`schedule_*`。
+
+没挡的三类，都是「挡掉会把取回的路一起断掉」：free-search 的四个检索工具、`present`、
+引导相位之外由 `tool-search` 延迟的一切。`restrict` 是注册表级的，被挡的名字不进装配、
+不进 `tool_search` 的目录、按名字调用还会被判成不存在的工具——所以凡是希望在延迟后能拿回来
+的，就绝不能进这个名单。
 
 两件事值得说明：
 
@@ -114,13 +121,17 @@ shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
   `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
   `load_workspace_dependencies`、`subagent`、`glob`、`skill`、`advanced_search`、
-  `multi_search`、`platform_search`、`free_search_test`、`str_replace_editor`
+  `multi_search`、`platform_search`、`free_search_test`、`str_replace_editor`、`present`
 - `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
   数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
 
 `str_replace_editor` 是引导相位的第二个工具：只在这一轮出现，晋级后收起来，真要用时由
 `tool_search` 取回。dsh-TUI 那条实测的首轮工具对就是 shell 加它；官方 0.2.1 的 minimal 已经
 不含编辑器（自 0.1.3-alpha.2 起 opt-in），所以这里自己挂了一行。
+
+`present` 交付文件用：把已有文件做成用户可点开的卡片。Claude Code 里对应 SendUserFile，
+语义一致，所以挂上了；因为低频，放进延迟名单——模型要交付时先
+`tool_search select:present` 拿 schema，再按名字调用。
 
 `advanced_search`、`multi_search`、`platform_search`、`free_search_test` 这四个是 free-search
 的检索工具，合计 2,984 字节。它们原来在 `tool-surface` 的拦截名单里，结果是模型照 `web_search`

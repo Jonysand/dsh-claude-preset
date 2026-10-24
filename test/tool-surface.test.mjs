@@ -67,7 +67,6 @@ test('挂载时挡掉名单里的宿主工具', () => {
 		assert.deepEqual(denied.sort(), [
 			'cordis_inspect_list',
 			'plugin_manager',
-			'present',
 			'schedule_create',
 			'workflow',
 			'working_directory',
@@ -75,6 +74,8 @@ test('挂载时挡掉名单里的宿主工具', () => {
 		for (const name of ['advanced_search', 'multi_search', 'platform_search', 'free_search_test']) {
 			assert.equal(denied.includes(name), false, `${name} 应该留给 tool-search 延迟`)
 		}
+		// present 和上面四个同理：挡住就搜不到 schema，交付这条路一起断
+		assert.equal(denied.includes('present'), false, 'present 应该留给 tool-search 延迟')
 		assert.match(stderr.lines.join('\n'), /restrict at mount:/)
 	} finally {
 		stderr.restore()
@@ -85,12 +86,12 @@ test('scoped 工具抛 unknown global tool 时保留，不重试', () => {
 	const stderr = captureStderr()
 	try {
 		const { ctx, denied } = harness({
-			schemas: [{ name: 'workflow' }, { name: 'present' }],
-			restrictFails: (name) => (name === 'present' ? 'unknown global tool "present"' : undefined),
+			schemas: [{ name: 'workflow' }, { name: 'schedule_create' }],
+			restrictFails: (name) => (name === 'schedule_create' ? 'unknown global tool "schedule_create"' : undefined),
 		})
 		apply(ctx)
 		assert.deepEqual(denied, ['workflow'])
-		assert.match(stderr.lines.join('\n'), /scoped, kept present/)
+		assert.match(stderr.lines.join('\n'), /scoped, kept schedule_create/)
 	} finally {
 		stderr.restore()
 	}

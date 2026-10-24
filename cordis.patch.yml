@@ -245,6 +245,15 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+          # 交付文件：present 把已经存在的文件做成用户可点开的卡片，适合 Office 文档、
+          # 表格、幻灯片。Claude Code 里没有这个工具（对应的是它的 SendUserFile），
+          # 所以按「用得少」处理：名字在下面的 defer 名单里，稳态不占工具表，
+          # 需要交付时用 tool_search 取回再调。它 inject 的四个服务 tools / fs /
+          # sessionProjections / workingDirectory 都在宿主层，本 preset 能解析。
+          # 注意 tool-surface 的拦截名单里没有它：那是给宿主全局工具用的，
+          # 这里是本 preset 自己挂的，挡住了就连取回的路一起断。
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
           # 延迟加载的两半（Step 1 + Step 2）：装配时从工具表里摘掉 config.defer 指定的工具，
           # 同时注册 tool_search 作为找回入口。
           # 摘掉只影响模型看见什么，不影响执行：执行从 registry 解析，不看装配结果，
@@ -260,6 +269,7 @@
           #   free_search_test，合计 2,984 字节）在这里延迟，不在 tool-surface 的拦截名单里：
           #   web_search 的描述末尾点着这四个名字，模型想换引擎时会去搜；挡掉就是空搜一次，
           #   延迟才是它真正的用法。实测见 2.14。
+          #   present 同理：交付文件是低频动作，工具本身不便宜，延迟之后稳态零成本。
           # - deferPatterns：按类。MCP 工具名是 mcp__<server>__<tool>，数量随 server 变，
           #   只能按模式表达。本 preset 当前没有 MCP server，这条是给将来接 MCP 留的；
           #   真接上之后单个 server 就是几十上百个工具、几万字符 schema。
@@ -286,7 +296,7 @@
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
-              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test', 'str_replace_editor']
+              defer: ['web_fetch', 'read_image', 'job_list', 'job_output', 'job_kill', 'list_agents', 'interrupt_agent', 'send_message', 'subagent_fork', 'load_workspace_dependencies', 'subagent', 'glob', 'skill', 'advanced_search', 'multi_search', 'platform_search', 'free_search_test', 'str_replace_editor', 'present']
               deferPatterns: ['mcp__*']
               # shell 按平台二选一，与官方 minimal preset 的写法一致：POSIX 给 bash，
               # Windows 给 pwsh。行内写三元表达式会被 YAML 当成映射键，所以用折叠块。

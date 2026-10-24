@@ -715,6 +715,29 @@ min 3），`docs/plugin-config-audit.md` 2.12 早就记过这条，preset 里却
 **留着备选。** 想再省不必换实现：把 `catalogDescriptionMaxLength` 压到 3，目录只剩名字
 （约 1.3 KB，省 7.6 KB）；再不够才轮到按需搜索。
 
+### 2.16 present 从拦截名单改成延迟（2026-10-24）
+
+`present` 原来是 `tool-surface` 前缀名单里的一条 `/^present$/`。那条基本没生效过：本 preset
+根本没挂 `dsh-tool-present`。它是各内置 preset 自己挂的（`dsh-web-app/presets/standard.patch.yml`
+第 121–122 行、`ptc.patch.yml` 第 128 行、`cordis.patch.yml` 第 130 行），写在各预设的插件
+列表里，落在 agent 层；而 `tool-surface` 的 `sweep()` 读的是不带 scope 的全局视图，agent 层的
+工具压根不在那张表里。
+
+**要让它在 `tool_search` 之后可用，得挂上并延迟。** 现在 `cordis.patch.yml` 加了一行
+`@deepseek-ai/dsh-tool-present`（它 inject 的 `tools` / `fs` / `sessionProjections` /
+`workingDirectory` 四个服务都在宿主层，能解析），名字进了 `defer`，前缀名单里删掉。稳态工具表
+不变（仍是 10 个），交付文件时先 `tool_search select:present` 拿 schema 再调用。
+
+**两侧都挡就等于彻底不可用。** `restrict` 是注册表级的：`view()` 里 `admits()` 不通过的名字
+不进 `visible`（`dsh-tools/lib/index.js` 第 3069 行），而 `get()` / `resolveExecution()` 读的
+就是 `visible`（第 3108 行）。所以被挡的名字既进不了装配，也进不了 `tool_search` 的目录
+（目录来自 `schemas()`），按名字调用还会被判成不存在的工具（UNKNOWN_TOOL）。这和装配层过滤器
+不同——后者只决定模型看见什么，执行照旧解析。结论：延迟与拦截互斥，要能取回就不能进
+`tool-surface` 的名单。
+
+**没有跟着挂 `dsh-agent-tool-presentation`。** `ptc` preset 两个都挂，`standard` 只挂工具。
+本 preset 按后者：提示词里不加额外的交付指引，靠 `tool_search` 取回 schema 就够。
+
 ---
 
 ## 三、两者的关系
