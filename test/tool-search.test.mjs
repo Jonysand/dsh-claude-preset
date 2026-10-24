@@ -45,7 +45,13 @@ function harness(schemas) {
 			return () => {}
 		},
 	}
-	return { ctx, registered, listener: (name) => listeners.get(name)?.[0], options: (name) => options.get(name) }
+	return {
+		ctx,
+		registered,
+		listener: (name) => listeners.get(name)?.[0],
+		count: (name) => listeners.get(name)?.length ?? 0,
+		options: (name) => options.get(name),
+	}
 }
 
 test('matchesPattern 只认一个星号', () => {
@@ -385,6 +391,34 @@ test('首步清空装配出来的 runtime-context，晋级之后恢复', async (
 		listener('session/event')(session, { type: 'tool/call' })
 		const later = await assemble({ tools: [] }, { agent: { session } }, async () => assembly())
 		assert.deepEqual(later.contexts, [{ name: 'sandbox', text: 'policy' }])
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('第一次引导相位的装配之后，pre-step 闸门重新 prepend 抢到链首', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-chain-head', events: [] }
+		const { ctx, listener, count, options } = harness([])
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
+		assert.equal(count('agent/pre-step'), 1)
+
+		const assembly = async () => ({ tools: [{ name: 'pwsh' }] })
+		await listener('system-prompt/assemble')({ tools: [] }, { agent: { session } }, assembly)
+		assert.equal(count('agent/pre-step'), 2)
+		// 只抢一次，不会每次装配都叠一层
+		await listener('system-prompt/assemble')({ tools: [] }, { agent: { session } }, assembly)
+		assert.equal(count('agent/pre-step'), 2)
+		assert.deepEqual(options('agent/pre-step'), { prepend: true })
+		assert.match(stderr.lines.join('\n'), /re-prepended after assembly/)
+
+		// 已经晋级的会话不抢：那条链上不该再挂层
+		const promoted = harness([])
+		apply(promoted.ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
+		const promotedSession = { id: 'session-promoted', events: [{ type: 'tool/call', seq: 1 }] }
+		await promoted.listener('system-prompt/assemble')({ tools: [] }, { agent: { session: promotedSession } }, assembly)
+		assert.equal(promoted.count('agent/pre-step'), 1)
 	} finally {
 		stderr.restore()
 	}

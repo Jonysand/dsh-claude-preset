@@ -100,9 +100,19 @@ CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_in
 `skill-invocation`，用户主动点的技能不是自动注入），其余无论是谁追加的都剥。晋级之后照常
 注入，第一轮没生成的 runtime-context 由循环自己的差分投影在下一个请求补上。
 
-代价是首轮模型看不到 cwd、沙箱与审批策略这些 runtime-context（本机实测约 660 字节）。它
-手上就是 shell，探索一下就知道在哪；不接受就把 `bootstrapSuppressRuntimeContext` 设
-`false`，只保留步骤路径那条。
+两条实测边界，接的时候踩到过：
+
+- **`assembled.contexts` 会被循环重新推导。** 请求装配前 `dsh-agent-loop` 会调
+  `refreshContext(assembly, …)`，它按 provider 重算，只保留 `required: true` 的那几条。
+  所以清空只对非 required 生效：沙箱策略、审批策略、harness 路径这些首轮消失，工作目录
+  那条（`dsh-working-directory` 标了 `required`）永远在。本机实测首轮 runtime-context
+  从 662 字节降到 179 字节。
+- **`prepend` 只是"注册时插到链首"。** 同层里最后注册的最外层；本插件是本地模块，比核心包
+  import 慢，只注册一次就可能被别人套在外面——`dsh-time-context` 也 prepend、也在 `next()`
+  之后追加消息。所以第一次真正处于引导相位的装配之后再 prepend 一次，抢回链首。
+
+代价是首轮模型看不到沙箱与审批策略（约 480 字节，cwd 仍在）。它手上就是 shell，不接受就
+把 `bootstrapSuppressRuntimeContext` 设 `false`，只保留步骤路径那条。
 
 shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`，Windows 是 `pwsh`。
 
