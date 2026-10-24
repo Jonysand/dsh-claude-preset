@@ -580,8 +580,12 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 
 | 相位 | 触发条件 | 工具表 |
 |---|---|---|
-| 引导 | 会话还没有持久的 `tool/call` | 只留引导集合：shell（按平台二选一）+ `str_replace_editor`。`tool_search` 也摘掉——这一轮没有东西可搜，留着它那句「Deferred tools (schema not loaded)」就是假的 |
-| 稳态 | 落下第一次 `tool/call` 之后 | 照旧摘掉 18 个 + 加回 `tool_search`。10 个工具 |
+| 引导 | 会话还没有持久的 `tool/call`，而且停在第 1 轮 | 只留引导集合：shell（按平台二选一）+ `str_replace_editor`。`tool_search` 也摘掉——这一轮没有东西可搜，留着它那句「Deferred tools (schema not loaded)」就是假的 |
+| 稳态 | 落下第一次 `tool/call`，或者进到第 2 轮 | 照旧摘掉 18 个 + 加回 `tool_search`。23 个工具 |
+
+轮次也算晋级信号。只看 `tool/call` 会留一个洞：第 1 轮如果只回文字（纯问答、直接给结论），
+窄表会一直留在这个会话里，第 2 轮要读文件才会发现 `read`/`grep` 根本不在表上。引导相位锚的
+是第一次请求，第 2 轮已经出了它的范围，所以 `turn/start` 的 `turn >= 2` 一到就退场。
 
 参考的第二件是剥上下文：`bootstrapSuppressContext` 列的 `skill-catalog` 与 `agent-instructions`
 在首步被摘掉。实现是 `agent/pre-step` 上的环绕监听器，带 `prepend` 插到链首——上游插件是在
@@ -603,7 +607,7 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
 **我们和参考还差三处，都是刻意的：**
 
 - 晋级之后给的是**延迟表**，不是全表。参考的稳态就是全量目录（它不做延迟加载）；本 preset 的
-  稳态是 10 个工具 + `tool_search`。
+  稳态是 23 个工具（含 `tool_search`）。
 - 不换提示词。参考在这一相位里连 persona 都换成 Minimal 那句
   `You are a helpful software engineer assistant.`（`complete: true`、关运行时上下文）。照搬
   等于首轮把 Claude Code 提示词换成另一句话，与复刻目标直接冲突。
@@ -616,12 +620,13 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
 参考实现的 `includeSubagents` 也默认 false。
 
 **相位从会话事件重建，不是进程内状态。** 用 `session.snapshotEvents()`（没有就用
-`session.events`）扫一次历史找 `tool/call`，之后靠 `session/event` 增量维护。恢复会话不会把
+`session.events`）扫一次历史找 `tool/call` 或 `turn/start`（`turn >= 2`），之后靠
+`session/event` 增量维护。恢复会话不会把
 引导相位重放一遍。读不出历史时按"已晋级"处理：宁可少放一次窄表，也不要因为一次读取失败把
 窄表长期留在会话里。引导集合里有一个名字没装配出来时也退回延迟表，不退全表。
 
-**代价。** 每场仍多一条 `request/header`，但方向反过来了：首轮从整张表 27 个降到 2 个，稳态
-仍是 10 个。短会话现在两轮都便宜。
+**代价。** 每场仍多一条 `request/header`。首轮从整张表降到 2 个，挂上 goal / schedule /
+workflow / plugin_manager / cordis_inspect 之后稳态是 23 个。短会话现在两轮都便宜。
 
 **新相位首次实测（2026-10-24 08:16，会话 `3d7c5f13`）。** 任务：排查 Jenkins 构建错误（工作
 目录 `E:\H42\renderit`），路由 `magpie / codemaker-chat/deepseek-flash`。截到 36 步、35 次工具
@@ -673,6 +678,32 @@ minimal——它只有一个持久 shell）。
 同场还有一次空命中（seq 80 找 `multi_search` 等四个）：那四个名字来自 `web_search` 自己的
 描述末尾，而它们当时被 `tool-surface` 挡掉了——挡的是注册表，`tool_search` 的取回通道跟着
 一起断。已改：这四个从拦截名单挪到 `defer`，合计 2,984 字节。
+
+**挂上 6 组工具之后（2026-10-24 09:04，会话 `75c0ea31`）。** 任务：复核 Messiah 贴图实时刷新的
+review 结论（工作目录 `D:\Messiah_src_stable`），路由同前。
+
+| 序 | 事件 | reason | 工具数 | 字节 |
+|---|---|---|---|---|
+| seq 11 | `request/header` | `initial` | 2 | 6,609 |
+| seq 29 | `request/header` | `change` | 23 | 27,440 |
+
+首轮仍是 `pwsh` + `str_replace_editor`。第 2 步那条 `developer/message` 里有 22 条
+`tool-addition` 和 1 条 `tool-removal: str_replace_editor`——它在引导集合里，同时也挂在 `defer`
+上，所以晋级时收起来了（全场 0 次调用，与 `3d7c5f13` 一致）。
+
+**缓存只在晋级那一步掉一次。** 47 步、1 轮：输入 4,174,488，命中 4,057,600，命中率 97.20%。
+
+| 步 | fresh | cached | 命中 |
+|---|---|---|---|
+| 1 | 3,705 | 3,072 | 45.3% |
+| 2 | 12,664 | 4,096 | 24.4% |
+| 3 | 11,094 | 16,896 | 60.4% |
+| 4 | 384 | 28,160 | 98.7% |
+
+首轮就命中 3,072：上一个会话留下的窄表前缀能跨会话复用，引导相位没有把缓存清零。第 3 步的
+16,896 约等于第 2 步整段 prompt（16,760），第 4 步的 28,160 约等于第 3 步的（28,257）——晋级
+之后一步就把缓存补全，此后每步都是增量。代价可算：第 1 步 prompt 6,777 token，晋级时只复用
+4,096，多花约 2,681，一次性。
 
 **还没验的事。** 两条都没有我们自己的数据：
 

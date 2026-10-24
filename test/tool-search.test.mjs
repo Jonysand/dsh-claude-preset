@@ -233,6 +233,38 @@ test('引导相位：首轮只留引导集合，落下工具调用之后晋升�
 	}
 })
 
+test('首轮只回文字也算晋级：进到第 2 轮就换成延迟表', async () => {
+	const stderr = captureStderr()
+	try {
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
+		const assemble = listener('system-prompt/assemble')
+		const next = async () => ({ tools: [{ name: 'pwsh' }, { name: 'read' }, { name: 'tool_search' }] })
+
+		// 第 1 轮只回文字、一次工具都不调，窄表不能被一直留着
+		const session = { id: 'session-text-only', events: [{ type: 'session' }] }
+		const context = { agent: { session } }
+		listener('session/event')(session, { type: 'turn/start', data: { turn: 1 } })
+		const first = await assemble({ tools: [] }, context, next)
+		assert.deepEqual(first.tools.map((tool) => tool.name), ['pwsh'])
+
+		// 第 2 轮一开始就退场，不必等工具调用
+		listener('session/event')(session, { type: 'turn/start', data: { turn: 2 } })
+		const second = await assemble({ tools: [] }, context, next)
+		assert.deepEqual(second.tools.map((tool) => tool.name), ['pwsh', 'tool_search'])
+
+		// 恢复会话同理：历史里没有工具调用，但已经过了第 1 轮
+		const resumed = {
+			id: 'session-resumed-text',
+			snapshotEvents: () => [{ type: 'session' }, { type: 'turn/start', data: { turn: 1 } }, { type: 'turn/start', data: { turn: 2 } }],
+		}
+		const restored = await assemble({ tools: [] }, { agent: { session: resumed } }, next)
+		assert.deepEqual(restored.tools.map((tool) => tool.name), ['pwsh', 'tool_search'])
+	} finally {
+		stderr.restore()
+	}
+})
+
 test('恢复会话不重放引导相位：历史里已有工具调用就直接用延迟表', async () => {
 	const stderr = captureStderr()
 	try {
