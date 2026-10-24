@@ -322,9 +322,16 @@
           # shell 按平台二选一，和官方 minimal preset 的写法一致：POSIX 是 bash，
           # Windows 是 pwsh。官方 minimal 在 0.2.1 里用的是持久 shell，这里用本 preset
           # 已挂的普通 shell，名字相同，schema 略窄。
-          # bootstrapSuppressContext：首步注入的技能目录与 AGENTS.md 摘要也摘掉。
+          # 首步自动注入也一并剥掉，按**路径**剥而不是按来源名字剥。两个入口各守一条：
+          # 装配路径把 assembled.contexts 整段清空（覆盖沙箱/审批策略快照和任何第三方
+          # 上下文提供者，不需要点名）；步骤路径只放行本轮从 inbox 认领的批次加
+          # bootstrapAllowKinds，其余无论是谁追加的都剥。
           # dsh-TUI 记录的是技能目录在场时锚定 0/9，剥掉后同一请求约 81%。
-          # 卸这两段只发生首轮，晋级后照常注入。
+          # 剥离只发生首轮，晋级后照常注入。
+          # 代价要说清：首轮模型看不到 cwd、沙箱与审批策略、harness 路径这些
+          # runtime-context（约 600 字节）。它手上就是 shell，探索一下就知道在哪；
+          # 第 2 条请求由循环自己的差分投影补回来。不想付这个代价就把
+          # bootstrapSuppressRuntimeContext 设 false，步骤路径那条仍然生效。
           # 子代理不走这个相位：被派出去时开局就要 read / grep / web_search，压成两个
           # 工具换不到锚定收益——锚定说的是顶层会话怎么开局。判定按 delegationDepth > 0
           # （会话头或运行时 options，取较大的那个），对齐参考实现的 includeSubagents
@@ -340,7 +347,8 @@
               # Windows 给 pwsh。行内写三元表达式会被 YAML 当成映射键，所以用折叠块。
               bootstrapTools: !!js >-
                 process.platform === 'win32' ? ['pwsh', 'str_replace_editor'] : ['bash', 'str_replace_editor']
-              bootstrapSuppressContext: ['skill-catalog', 'agent-instructions']
+              bootstrapAllowKinds: ['skill-invocation']
+              bootstrapSuppressRuntimeContext: true
           # 工具表审计 + 缓存代价观测。不再拦截任何工具。
           #
           # 早先这里挡过一批宿主工具，2026-10-24 全清：web/desktop 里宿主层本来就把那些行

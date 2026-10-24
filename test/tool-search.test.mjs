@@ -321,36 +321,89 @@ test('引导集合里的名字没装配出来时退回延迟表，不放全表',
 	}
 })
 
-test('首步剥掉技能目录与工作区指令，晋级之后放行', async () => {
+test('首步按路径剥注入：只留本轮认领的批次加技能手势', async () => {
 	const stderr = captureStderr()
 	try {
 		const session = { id: 'session-context', events: [] }
 		const { ctx, listener, options } = harness([])
-		apply(ctx, {
-			defer: ['read'],
-			bootstrapTools: ['pwsh'],
-			bootstrapSuppressContext: ['skill-catalog', 'agent-instructions'],
-		})
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
 		const preStep = listener('agent/pre-step')
 		assert.deepEqual(options('agent/pre-step'), { prepend: true })
+		const anonymous = { source: { kind: 'user' } }
+		const claimed = [{ id: 1, source: { kind: 'user' } }, anonymous]
 		const messages = [
 			{ id: 1, source: { kind: 'user' } },
 			{ id: 2, source: { kind: 'skill-catalog' } },
 			{ id: 3, source: { kind: 'agent-instructions' } },
 			{ id: 4, source: { kind: 'time-context' } },
-			{ id: 5 },
+			{ id: 5, source: { kind: 'skill-invocation', name: 'office' } },
+			{ id: 6 },
+			{ id: 7, source: { kind: 'brand-new-injector' } },
+			{ id: 8, source: { kind: 'user' } },
+			anonymous,
 		]
-		const decision = await preStep({ agent: { session } }, async () => ({ kind: 'enter', messages }))
-		assert.deepEqual(decision.messages.map((message) => message.id), [1, 4, 5])
+		const decision = await preStep({ agent: { session }, messages: claimed }, async () => ({ kind: 'enter', messages }))
+		// 认领的批次原样留下（含没有 id、只靠身份对上的那条）；
+		// 白名单里的技能手势留下；其余一律剥——包括没见过的注入源和没被认领的 user 消息。
+		assert.deepEqual(decision.messages.map((message) => message.id), [1, 5, undefined])
 
 		// 上游拒绝就原样返回，不碰
-		const rejected = await preStep({ agent: { session } }, async () => ({ kind: 'reject' }))
+		const rejected = await preStep({ agent: { session }, messages: claimed }, async () => ({ kind: 'reject' }))
 		assert.equal(rejected.kind, 'reject')
 
-		// 晋级之后两种注入都放行
+		// 晋级之后全部放行
 		listener('session/event')(session, { type: 'tool/call' })
-		const after = await preStep({ agent: { session } }, async () => ({ kind: 'enter', messages }))
-		assert.equal(after.messages.length, 5)
+		const after = await preStep({ agent: { session }, messages: claimed }, async () => ({ kind: 'enter', messages }))
+		assert.equal(after.messages.length, messages.length)
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('首步清空装配出来的 runtime-context，晋级之后恢复', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-runtime', events: [] }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
+		const assemble = listener('system-prompt/assemble')
+		// 沙箱/审批快照和任何第三方上下文提供者都走这一处，不需要点名。
+		const assembly = () => ({
+			sections: [],
+			contexts: [{ name: 'sandbox', text: 'policy' }],
+			tools: [{ name: 'pwsh' }, { name: 'read' }],
+			variables: {},
+		})
+		const first = await assemble({ tools: [] }, { agent: { session } }, async () => assembly())
+		assert.deepEqual(first.contexts, [])
+		assert.deepEqual(first.tools.map((tool) => tool.name), ['pwsh'])
+
+		// 不是 agent 的装配（会话标题等）不动它：拿不到相位就放行
+		const untargeted = await assemble({ tools: [] }, {}, async () => assembly())
+		assert.equal(untargeted.contexts.length, 1)
+
+		listener('session/event')(session, { type: 'tool/call' })
+		const later = await assemble({ tools: [] }, { agent: { session } }, async () => assembly())
+		assert.deepEqual(later.contexts, [{ name: 'sandbox', text: 'policy' }])
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('bootstrapSuppressRuntimeContext: false 时首步保留 runtime-context', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-runtime-off', events: [] }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'], bootstrapSuppressRuntimeContext: false })
+		const assembled = await listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: { session } },
+			async () => ({ tools: [{ name: 'pwsh' }], contexts: [{ name: 'sandbox', text: 'policy' }] }),
+		)
+		assert.equal(assembled.contexts.length, 1)
+		// 工具面照旧收窄：开关只影响上下文那一条
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['pwsh'])
 	} finally {
 		stderr.restore()
 	}
@@ -379,8 +432,11 @@ test('子代理不走引导相位：首轮直接拿延迟表，也不剥上下�
 	const stderr = captureStderr()
 	try {
 		const tools = [{ name: 'pwsh' }, { name: 'str_replace_editor' }, { name: 'read' }, { name: 'tool_search' }]
-		const messages = [{ id: 1, source: { kind: 'skill-catalog' } }, { id: 2, source: { kind: 'user' } }]
-		const config = { defer: ['read'], bootstrapTools: ['pwsh'], bootstrapSuppressContext: ['skill-catalog'] }
+		const userMessage = { id: 2, source: { kind: 'user' } }
+		const messages = [{ id: 1, source: { kind: 'skill-catalog' } }, userMessage]
+		const claimed = [userMessage]
+		const contexts = [{ name: 'sandbox', text: 'policy' }]
+		const config = { defer: ['read'], bootstrapTools: ['pwsh'] }
 
 		// 会话头里的深度与运行时 options 都算数，取两者较大的那个
 		const subagents = [
@@ -390,13 +446,18 @@ test('子代理不走引导相位：首轮直接拿延迟表，也不剥上下�
 		for (const agent of subagents) {
 			const { ctx, listener } = harness([])
 			apply(ctx, config)
-			const assembled = await listener('system-prompt/assemble')({ tools: [] }, { agent }, async () => ({ tools }))
+			const assembled = await listener('system-prompt/assemble')(
+				{ tools: [] },
+				{ agent },
+				async () => ({ tools, contexts }),
+			)
 			assert.deepEqual(
 				assembled.tools.map((tool) => tool.name),
 				['pwsh', 'str_replace_editor', 'tool_search'],
 				`${agent.session.id} 应拿到延迟表`,
 			)
-			const decision = await listener('agent/pre-step')({ agent }, async () => ({ kind: 'enter', messages }))
+			assert.equal(assembled.contexts.length, 1, `${agent.session.id} 不该清空 runtime-context`)
+			const decision = await listener('agent/pre-step')({ agent, messages: claimed }, async () => ({ kind: 'enter', messages }))
 			assert.equal(decision.messages.length, 2, `${agent.session.id} 不该剥上下文`)
 		}
 
@@ -404,9 +465,14 @@ test('子代理不走引导相位：首轮直接拿延迟表，也不剥上下�
 		const top = harness([])
 		apply(top.ctx, config)
 		const topAgent = { session: { id: 'session-top', header: {}, events: [] } }
-		const narrowed = await top.listener('system-prompt/assemble')({ tools: [] }, { agent: topAgent }, async () => ({ tools }))
+		const narrowed = await top.listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: topAgent },
+			async () => ({ tools, contexts }),
+		)
 		assert.deepEqual(narrowed.tools.map((tool) => tool.name), ['pwsh'])
-		const topDecision = await top.listener('agent/pre-step')({ agent: topAgent }, async () => ({ kind: 'enter', messages }))
+		assert.deepEqual(narrowed.contexts, [])
+		const topDecision = await top.listener('agent/pre-step')({ agent: topAgent, messages: claimed }, async () => ({ kind: 'enter', messages }))
 		assert.deepEqual(topDecision.messages.map((message) => message.id), [2])
 	} finally {
 		stderr.restore()

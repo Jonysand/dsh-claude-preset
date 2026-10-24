@@ -94,8 +94,15 @@ CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_in
 11/11 掉回 standard 式行为」（见 [2.14](docs/deferred-tools-gaps.md)），给全表恰好是失败的
 那一侧。
 
-同一个相位还会剥掉首步注入的技能目录与 `AGENTS.md` 摘要（`bootstrapSuppressContext`）：它们
-是自动注入的用户消息，在场时会盖过工具面本身。晋级之后照常注入。
+同一个相位还会剥掉首步的自动注入，按**路径**剥而不是按来源名字剥。两条入口：装配路径把
+`assembled.contexts` 整段清空（覆盖沙箱/审批快照和任何第三方上下文提供者，不需要点名）；
+步骤路径只保留本轮从 inbox 认领的消息批次加 `bootstrapAllowKinds`（默认
+`skill-invocation`，用户主动点的技能不是自动注入），其余无论是谁追加的都剥。晋级之后照常
+注入，第一轮没生成的 runtime-context 由循环自己的差分投影在下一个请求补上。
+
+代价是首轮模型看不到 cwd、沙箱与审批策略这些 runtime-context（本机实测约 660 字节）。它
+手上就是 shell，探索一下就知道在哪；不接受就把 `bootstrapSuppressRuntimeContext` 设
+`false`，只保留步骤路径那条。
 
 shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`，Windows 是 `pwsh`。
 

@@ -591,9 +591,22 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 理由是文字回复不消耗锚定。我们的取舍是：宁可让「先闲聊、再干活」的会话失去锚定，也不让第 2
 轮缺 `read`/`grep`——缺工具是当场就坏，锚定只是个概率。
 
-参考的第二件是剥上下文：`bootstrapSuppressContext` 列的 `skill-catalog` 与 `agent-instructions`
-在首步被摘掉。实现是 `agent/pre-step` 上的环绕监听器，带 `prepend` 插到链首——上游插件是在
-`next()` 之后才把自己的消息追加进 `decision.messages`，只有插到链首才等于剥在最后。
+参考的第二件是剥上下文：它把首步的自动注入整段挡掉。第一版照抄成**按名字点名**——
+`bootstrapSuppressContext` 列的 `skill-catalog` 与 `agent-instructions` 在首步被摘掉，
+实现是 `agent/pre-step` 上的环绕监听器，带 `prepend` 插到链首（上游插件是在 `next()`
+之后才把自己的消息追加进 `decision.messages`，只有插到链首才等于剥在最后）。
+
+点名的毛病是漏：以后新增的注入源不在名单上，就从缝里进来。现在改成**按路径剥**，两条入口：
+
+- 装配路径：未晋级时把 `assembled.contexts` 整段清空。这覆盖整个 `SystemPrompt.context()`
+  家族——沙箱/审批策略快照和任何第三方上下文提供者——不需要点名。第一轮没有快照，循环自己的
+  差分投影会在第一个晋级后的请求恰好补一条全新的，所以"首轮极简、二轮注入"不需要再注入逻辑。
+- 步骤路径：`agent/pre-step` 的 payload 里 `messages` 是本轮从 inbox 认领的消息批次，
+  只保留这一批加一个 kind 白名单（`bootstrapAllowKinds`，默认 `skill-invocation`——
+  用户主动点的技能是用户动作，不是自动注入）。
+
+仍是 `prepend` 插到链首。判不出相位、上游 `reject`、自身异常三种情况一律放行：过滤器
+自己的问题不能吃掉用户上下文。
 
 **方向先接反过一次（提交 94b7d14）。** 第一版理解成「首轮给全表，首次工具调用后收窄」，理由
 写的是「首轮要像 Claude Code 原本那张表」。参考实现是反的：`tool-bootstrap.mjs` 在未晋级时把
