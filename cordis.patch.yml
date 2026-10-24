@@ -279,6 +279,10 @@
           # bootstrapSuppressContext：首步注入的技能目录与 AGENTS.md 摘要也摘掉。
           # dsh-TUI 记录的是技能目录在场时锚定 0/9，剥掉后同一请求约 81%。
           # 卸这两段只发生首轮，晋级后照常注入。
+          # 子代理不走这个相位：被派出去时开局就要 read / grep / web_search，压成两个
+          # 工具换不到锚定收益——锚定说的是顶层会话怎么开局。判定按 delegationDepth > 0
+          # （会话头或运行时 options，取较大的那个），对齐参考实现的 includeSubagents
+          # 默认 false。
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:

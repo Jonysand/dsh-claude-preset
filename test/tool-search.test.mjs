@@ -343,6 +343,44 @@ test('不配引导集合时，有会话也照样立刻延迟', async () => {
 	}
 })
 
+test('子代理不走引导相位：首轮直接拿延迟表，也不剥上下文', async () => {
+	const stderr = captureStderr()
+	try {
+		const tools = [{ name: 'pwsh' }, { name: 'str_replace_editor' }, { name: 'read' }, { name: 'tool_search' }]
+		const messages = [{ id: 1, source: { kind: 'skill-catalog' } }, { id: 2, source: { kind: 'user' } }]
+		const config = { defer: ['read'], bootstrapTools: ['pwsh'], bootstrapSuppressContext: ['skill-catalog'] }
+
+		// 会话头里的深度与运行时 options 都算数，取两者较大的那个
+		const subagents = [
+			{ session: { id: 'session-child-header', header: { delegationDepth: 1 }, events: [] } },
+			{ session: { id: 'session-child-options', events: [] }, options: { subagentDepth: 2 } },
+		]
+		for (const agent of subagents) {
+			const { ctx, listener } = harness([])
+			apply(ctx, config)
+			const assembled = await listener('system-prompt/assemble')({ tools: [] }, { agent }, async () => ({ tools }))
+			assert.deepEqual(
+				assembled.tools.map((tool) => tool.name),
+				['pwsh', 'str_replace_editor', 'tool_search'],
+				`${agent.session.id} 应拿到延迟表`,
+			)
+			const decision = await listener('agent/pre-step')({ agent }, async () => ({ kind: 'enter', messages }))
+			assert.equal(decision.messages.length, 2, `${agent.session.id} 不该剥上下文`)
+		}
+
+		// 同一份配置下，顶层会话照旧收窄并剥掉注入
+		const top = harness([])
+		apply(top.ctx, config)
+		const topAgent = { session: { id: 'session-top', header: {}, events: [] } }
+		const narrowed = await top.listener('system-prompt/assemble')({ tools: [] }, { agent: topAgent }, async () => ({ tools }))
+		assert.deepEqual(narrowed.tools.map((tool) => tool.name), ['pwsh'])
+		const topDecision = await top.listener('agent/pre-step')({ agent: topAgent }, async () => ({ kind: 'enter', messages }))
+		assert.deepEqual(topDecision.messages.map((message) => message.id), [2])
+	} finally {
+		stderr.restore()
+	}
+})
+
 test('描述里列全被延迟的名字，不按字母序丢掉尾部', () => {
 	const stderr = captureStderr()
 	try {

@@ -609,6 +609,12 @@ Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏
   等于首轮把 Claude Code 提示词换成另一句话，与复刻目标直接冲突。
 - 压缩不重新锚定。参考在 `compaction/end` 之后回落到引导对（epoch-aware）。这里压缩不重置。
 
+**子代理跳过这个相位。** 判定按 `delegationDepth > 0`：会话头里的值与运行时
+`options.subagentDepth` 取较大者，口径同 `dsh-subagent` 的 `delegationDepthOf`（恢复回来的
+子代理带着新的 options，会话头才是权威值，而 options 只会加深）。子代理被派出去时开局通常就
+要 `read`/`grep`/`web_search`，压成两个工具换不到锚定收益——锚定说的是顶层会话怎么开局。
+参考实现的 `includeSubagents` 也默认 false。
+
 **相位从会话事件重建，不是进程内状态。** 用 `session.snapshotEvents()`（没有就用
 `session.events`）扫一次历史找 `tool/call`，之后靠 `session/event` 增量维护。恢复会话不会把
 引导相位重放一遍。读不出历史时按"已晋级"处理：宁可少放一次窄表，也不要因为一次读取失败把

@@ -102,6 +102,10 @@ free-search 的四个检索工具（`advanced_search`、`multi_search`、`platfo
 
 shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`，Windows 是 `pwsh`。
 
+子代理不走这个相位。判定按 `delegationDepth > 0`（会话头与运行时 `options.subagentDepth`
+取较大者），子代理开局直接就是延迟表，也不剥上下文——它们被派出去时通常马上要
+`read`/`grep`/`web_search`。参考实现的 `includeSubagents` 也默认 false。
+
 相位从会话事件重建，不是进程内状态：恢复会话时扫一次历史，压缩不重置。所以一个会话只会
 多这一条 `request/header`。
 
