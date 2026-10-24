@@ -208,29 +208,32 @@ test('装配过滤器带 prepend，后注册的监听器加塞的工具也会被
 	}
 })
 
-test('首轮给全表：只摘掉 tool_search 自己，第一次工具调用之后才延迟', async () => {
+test('引导相位：首轮只留引导集合，落下工具调用之后晋升成延迟表', async () => {
 	const stderr = captureStderr()
 	try {
 		const session = { id: 'session-anchor', events: [{ type: 'session' }] }
 		const { ctx, listener } = harness([])
-		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh', 'str_replace_editor'] })
 		const assemble = listener('system-prompt/assemble')
 		const context = { agent: { session } }
-		const next = async () => ({ tools: [{ name: 'read' }, { name: 'glob' }, { name: 'tool_search' }] })
+		const next = async () => ({
+			tools: [{ name: 'pwsh' }, { name: 'str_replace_editor' }, { name: 'read' }, { name: 'glob' }, { name: 'tool_search' }],
+		})
 
+		// 首轮连 tool_search 都不留：这一轮没有东西可搜
 		const first = await assemble({ tools: [] }, context, next)
-		assert.deepEqual(first.tools.map((tool) => tool.name), ['read', 'glob'])
+		assert.deepEqual(first.tools.map((tool) => tool.name), ['pwsh', 'str_replace_editor'])
 
 		// 落下第一次持久的工具调用之后，同一个会话转成延迟表
 		listener('session/event')(session, { type: 'tool/call', seq: 3 })
 		const later = await assemble({ tools: [] }, context, next)
-		assert.deepEqual(later.tools.map((tool) => tool.name), ['glob', 'tool_search'])
+		assert.deepEqual(later.tools.map((tool) => tool.name), ['pwsh', 'str_replace_editor', 'glob', 'tool_search'])
 	} finally {
 		stderr.restore()
 	}
 })
 
-test('恢复会话不重放首轮：历史里已有工具调用就直接用延迟表', async () => {
+test('恢复会话不重放引导相位：历史里已有工具调用就直接用延迟表', async () => {
 	const stderr = captureStderr()
 	try {
 		const session = {
@@ -238,37 +241,90 @@ test('恢复会话不重放首轮：历史里已有工具调用就直接用延�
 			snapshotEvents: () => [{ type: 'session' }, { type: 'tool/call', seq: 9 }],
 		}
 		const { ctx, listener } = harness([])
-		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
 		const assembled = await listener('system-prompt/assemble')(
 			{ tools: [] },
 			{ agent: { session } },
-			async () => ({ tools: [{ name: 'read' }, { name: 'tool_search' }] }),
+			async () => ({ tools: [{ name: 'read' }, { name: 'pwsh' }, { name: 'tool_search' }] }),
 		)
-		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['tool_search'])
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['pwsh', 'tool_search'])
 	} finally {
 		stderr.restore()
 	}
 })
 
-test('读不出会话历史时按已过首轮处理，不放全表', async () => {
+test('读不出会话历史时按已晋级处理，不放窄表', async () => {
 	const stderr = captureStderr()
 	try {
 		const session = { id: 'session-broken', snapshotEvents() { throw new Error('boom') } }
 		const { ctx, listener } = harness([])
-		apply(ctx, { defer: ['read'], firstRequestFullCatalog: true })
+		apply(ctx, { defer: ['read'], bootstrapTools: ['pwsh'] })
 		const assembled = await listener('system-prompt/assemble')(
 			{ tools: [] },
 			{ agent: { session } },
-			async () => ({ tools: [{ name: 'read' }, { name: 'tool_search' }] }),
+			async () => ({ tools: [{ name: 'read' }, { name: 'pwsh' }, { name: 'tool_search' }] }),
 		)
-		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['tool_search'])
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['pwsh', 'tool_search'])
 		assert.match(stderr.lines.join('\n'), /phase: session history unreadable/)
 	} finally {
 		stderr.restore()
 	}
 })
 
-test('不开首轮例外时，有会话也照样立刻延迟', async () => {
+test('引导集合里的名字没装配出来时退回延迟表，不放全表', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-absent', events: [] }
+		const { ctx, listener } = harness([])
+		apply(ctx, { defer: ['read'], bootstrapTools: ['bash', 'str_replace_editor'] })
+		const assembled = await listener('system-prompt/assemble')(
+			{ tools: [] },
+			{ agent: { session } },
+			async () => ({ tools: [{ name: 'pwsh' }, { name: 'read' }, { name: 'glob' }, { name: 'tool_search' }] }),
+		)
+		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['pwsh', 'glob', 'tool_search'])
+		assert.match(stderr.lines.join('\n'), /bootstrap tool\(s\) absent: bash,str_replace_editor/)
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('首步剥掉技能目录与工作区指令，晋级之后放行', async () => {
+	const stderr = captureStderr()
+	try {
+		const session = { id: 'session-context', events: [] }
+		const { ctx, listener, options } = harness([])
+		apply(ctx, {
+			defer: ['read'],
+			bootstrapTools: ['pwsh'],
+			bootstrapSuppressContext: ['skill-catalog', 'agent-instructions'],
+		})
+		const preStep = listener('agent/pre-step')
+		assert.deepEqual(options('agent/pre-step'), { prepend: true })
+		const messages = [
+			{ id: 1, source: { kind: 'user' } },
+			{ id: 2, source: { kind: 'skill-catalog' } },
+			{ id: 3, source: { kind: 'agent-instructions' } },
+			{ id: 4, source: { kind: 'time-context' } },
+			{ id: 5 },
+		]
+		const decision = await preStep({ agent: { session } }, async () => ({ kind: 'enter', messages }))
+		assert.deepEqual(decision.messages.map((message) => message.id), [1, 4, 5])
+
+		// 上游拒绝就原样返回，不碰
+		const rejected = await preStep({ agent: { session } }, async () => ({ kind: 'reject' }))
+		assert.equal(rejected.kind, 'reject')
+
+		// 晋级之后两种注入都放行
+		listener('session/event')(session, { type: 'tool/call' })
+		const after = await preStep({ agent: { session } }, async () => ({ kind: 'enter', messages }))
+		assert.equal(after.messages.length, 5)
+	} finally {
+		stderr.restore()
+	}
+})
+
+test('不配引导集合时，有会话也照样立刻延迟', async () => {
 	const stderr = captureStderr()
 	try {
 		const session = { id: 'session-off', events: [] }
@@ -281,6 +337,7 @@ test('不开首轮例外时，有会话也照样立刻延迟', async () => {
 		)
 		assert.deepEqual(assembled.tools.map((tool) => tool.name), ['glob', 'tool_search'])
 		assert.equal(listener('session/event'), undefined)
+		assert.equal(listener('agent/pre-step'), undefined)
 	} finally {
 		stderr.restore()
 	}

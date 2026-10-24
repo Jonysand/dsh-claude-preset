@@ -88,13 +88,19 @@ free-search 的四个检索工具（`advanced_search`、`multi_search`、`platfo
 
 发现工具注册失败时整层不启用——工具被摘掉却找不回来，那是不可恢复的坏状态。
 
-首轮例外（`firstRequestFullCatalog`，本 preset 开着）：第一次请求一个工具都不摘，工具表
-就是 Claude Code 原本那张（22 个），只把 `tool_search` 自己拿掉——这一轮没有东西可搜，
-留着只会误导。等这个会话落下第一次持久的工具调用，之后才开始摘。
+引导相位（`bootstrapTools`，本 preset 开着）：第一次请求只暴露 shell 加
+`str_replace_editor`，其余全摘，`tool_search` 自己也不留——这一轮没有东西可搜，留着只会
+误导。等这个会话落下第一次持久的工具调用，之后才晋升成上面那套延迟表。
 
-为什么：模型会用第一轮看见的工具目录锚定接下来怎么干活，首轮目录一变，复刻出来的行为
-也跟着漂。这和省字节的方向相反，首轮反而更贵；换来的是稳态照样省，一场 70 步的会话只在
-首轮付全价。
+为什么：模型会用第一轮看见的工具目录锚定接下来怎么干活，所以要给的是**最小的那面**。方向
+别接反：dsh-TUI 在 V4 Pro 上测的是「Minimal 那对 5/5 落在 Minimal 轨迹，standard 系 schema
+11/11 掉回 standard 式行为」（见 [2.14](docs/deferred-tools-gaps.md)），给全表恰好是失败的
+那一侧。
+
+同一个相位还会剥掉首步注入的技能目录与 `AGENTS.md` 摘要（`bootstrapSuppressContext`）：它们
+是自动注入的用户消息，在场时会盖过工具面本身。晋级之后照常注入。
+
+shell 按平台二选一，照官方 minimal preset 的写法：POSIX 是 `bash`，Windows 是 `pwsh`。
 
 相位从会话事件重建，不是进程内状态：恢复会话时扫一次历史，压缩不重置。所以一个会话只会
 多这一条 `request/header`。
@@ -104,13 +110,18 @@ free-search 的四个检索工具（`advanced_search`、`multi_search`、`platfo
 - `defer`（精确名字）：`web_fetch`、`read_image`、`job_list`、`job_output`、`job_kill`、
   `list_agents`、`interrupt_agent`、`send_message`、`subagent_fork`、
   `load_workspace_dependencies`、`subagent`、`glob`、`skill`、`advanced_search`、
-  `multi_search`、`platform_search`、`free_search_test`
+  `multi_search`、`platform_search`、`free_search_test`、`str_replace_editor`
 - `deferPatterns`（按类）：`mcp__*`。只认一个 `*`。MCP 工具名是 `mcp__<server>__<tool>`，
   数量随 server 变，只能按模式表达；本 preset 目前没有 MCP server，这条是给将来留的。
 
-最后四个是 free-search 的检索工具，合计 2,984 字节。它们原来在 `tool-surface` 的拦截名单里，
-结果是模型照 `web_search` 描述末尾点的名字去搜，搜不到，白花一次往返（实测见 2.14）。现在改成
-延迟：平时不出现在表里，模型想换引擎时 `tool_search` 能搜到、拿到 schema 再调用。
+`str_replace_editor` 是引导相位的第二个工具：只在这一轮出现，晋级后收起来，真要用时由
+`tool_search` 取回。dsh-TUI 那条实测的首轮工具对就是 shell 加它；官方 0.2.1 的 minimal 已经
+不含编辑器（自 0.1.3-alpha.2 起 opt-in），所以这里自己挂了一行。
+
+`advanced_search`、`multi_search`、`platform_search`、`free_search_test` 这四个是 free-search
+的检索工具，合计 2,984 字节。它们原来在 `tool-surface` 的拦截名单里，结果是模型照 `web_search`
+描述末尾点的名字去搜，搜不到，白花一次往返（实测见 2.14）。现在改成延迟：平时不出现在表里，
+模型想换引擎时 `tool_search` 能搜到、拿到 schema 再调用。
 
 挑的原则：一旦被延迟，首次使用要多花一次 `tool_search` 往返，所以高频的 `read`、`edit`、
 `pwsh`、`grep`、`web_search` 一律常驻。系统提示点名要求使用的工具（`todo_write`）同样常驻：
@@ -128,12 +139,13 @@ free-search 的四个检索工具（`advanced_search`、`multi_search`、`platfo
 - 名单 13 个：工具表 22 → 10，工具块 10,925 字节。一场 70 步、88 次调用的会话里工具表
   一次没变（全场只有一条 `request/header`），延迟的 `subagent` 用了 4 次、`send_message`
   用了 1 次，都是拿到 schema 之后按名字直接调用。
-- 首轮例外打开后（2026-10-24）：一场 20 步、37 次调用的会话是两条 `request/header`——首轮
-  22 个工具、17,222 字节，之后 10 个、10,925 字节。表变化后模型把被延迟的 `web_fetch` 搜出来，
-  随后用了 23 次，没有一次调用失败。那次跑在四个检索工具挪进 `defer` 之前；现在首轮是 26 个。
+- 相位打开后（2026-10-24）：一场 20 步、37 次调用的会话是两条 `request/header`——首轮
+  22 个工具、17,222 字节，之后 10 个、10,925 字节。这一场跑的是**接反**的那一版（首轮给
+  全表），现已翻成首轮最窄。可用的观察是：晋级那一刻整张表换掉，模型照样把被延迟的
+  `web_fetch` 搜出来用了 23 次，没有一次失败——切换本身不打断工作。
 
 数据见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.9、2.10、2.13、2.14。
-前四条是首轮例外之前跑的，那时全场只有一条 `request/header`；第五条是打开之后的。
+前四条是打开相位之前跑的，那时全场只有一条 `request/header`；第五条是打开之后跑的，方向接反。
 
 注意这只在缓存的 0.1x 档位上省，**净收益 = 被延迟 schema 之和 − `tool_search` 的开销**，
 所以这套东西真正的回本点是 MCP 那种几万字符起步的工具包。

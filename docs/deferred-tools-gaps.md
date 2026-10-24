@@ -563,7 +563,7 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 之后，它一次派了 4 个。所以延迟的上限不是"模型不用工具"，而是"在用户或任务给出必须用的
 信号之前，想不起来用它"。`glob` 被 `pwsh` 替代也是同一回事：`pwsh` 够用，信号不够强。
 
-### 2.14 首轮给全表：让第一次请求留在 Claude Code 的目录上（2026-10-23）
+### 2.14 引导相位：首轮给最窄的工具面，第一次工具调用后晋升（2026-10-23 起，10-24 掉头）
 
 起因是看 dsh-TUI 那个项目（`ccch1mneyyy/dsh-TUI`）里的 liangshen preset。他们做的是反方向的
 同类事，但顺手记了一条实测：**第一次请求的工具目录会锚定整场的行为**。V4 Pro 上，Minimal 那对
@@ -576,57 +576,76 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 我们只是减外围工具（`glob`/`skill`/`subagent`/`web_fetch`/`read_image`/`job_*`），风险比他们那个
 弱，但不是零。
 
-**接法。** 加一个相位，配置键 `firstRequestFullCatalog`：
+**接法。** 加一个相位，配置键 `bootstrapTools`：
 
 | 相位 | 触发条件 | 工具表 |
 |---|---|---|
-| 首轮 | 会话还没有持久的 `tool/call` | 原样给出装配结果，只摘掉 `tool_search` 自己。这一轮没有东西可搜，留着只会误导。22 个工具、17,222 字节 |
-| 稳态 | 落下第一次 `tool/call` 之后 | 照旧摘掉 13 个 + 加回 `tool_search`。10 个工具、10,925 字节 |
+| 引导 | 会话还没有持久的 `tool/call` | 只留引导集合：shell（按平台二选一）+ `str_replace_editor`。`tool_search` 也摘掉——这一轮没有东西可搜，留着它那句「Deferred tools (schema not loaded)」就是假的 |
+| 稳态 | 落下第一次 `tool/call` 之后 | 照旧摘掉 18 个 + 加回 `tool_search`。10 个工具 |
 
-首轮摘掉 `tool_search` 而不是留着，是因为它的描述写着「Deferred tools (schema not loaded)」——
-首轮一个都没延迟，这句就是假的。
+参考的第二件是剥上下文：`bootstrapSuppressContext` 列的 `skill-catalog` 与 `agent-instructions`
+在首步被摘掉。实现是 `agent/pre-step` 上的环绕监听器，带 `prepend` 插到链首——上游插件是在
+`next()` 之后才把自己的消息追加进 `decision.messages`，只有插到链首才等于剥在最后。
 
-**相位从会话事件重建，不是进程内状态。** 用 `session.snapshotEvents()`（没有就用 `session.events`）
-扫一次历史找 `tool/call`，之后靠 `session/event` 增量维护。这样恢复会话不会把首轮重放一遍——重放
-会多一条 `request/header`，还让工具表白变一次。压缩不重置：压缩之后会话的风格已经定了，再放一次
-全表只是多付一次钱。
+**方向先接反过一次（提交 94b7d14）。** 第一版理解成「首轮给全表，首次工具调用后收窄」，理由
+写的是「首轮要像 Claude Code 原本那张表」。参考实现是反的：`tool-bootstrap.mjs` 在未晋级时把
+装配结果**收窄**到 `bootstrapTools`（默认 `bash` + `str_replace_editor`），晋级后才
+`return assembled` 把完整目录一次放开。他们的数据也指这个方向：首轮目录越大越掉族，全表恰好
+是 11/11 的那一侧。这一版按参考掉头。
 
-读不出历史时按"已过首轮"处理。稳态是延迟，宁可少放一次全表，也不要因为一次读取失败把整张表长期
-放出去。
+**参考的第三件没有跟：bash 身份。** 他们专门写了 `custom-bash.mjs`，在 Windows 上沿 PATH 找
+Git Bash、造一个叫 `bash` 的真工具，因为官方 minimal 的持久 bash 靠 PTY，而 PTY 后端只支持
+linux/darwin。但官方 minimal 自己是**按平台二选一**的：`persistent-bash` 带
+`disabled: process.platform === 'win32'`，配一个 `persistent-pwsh` 带反向判断。也就是说
+Windows 上 minimal 的 shell 本来就是 pwsh，硬塞一个 bash 反而是偏离。本 preset 的 shell 行
+早就是这个写法，引导集合按平台取 `bash` 或 `pwsh`。
 
-**代价。** 每个会话多一条 `request/header`，首轮付全价 17,222 字节。2.13 那场 70 步的会话按 69 步
-结账，仍是 69 × 6,297 ≈ 424 KB 的净省。真正变贵的是短会话：一次问答只有两次请求时，首轮全表 +
-次轮延迟，比一直延迟多 6,297 字节。
+**我们和参考还差三处，都是刻意的：**
 
-**首次实测（2026-10-24 07:48）。** 会话 `23ee8da0`，任务「详细收集 kimi k3.1 pro 的消息并
-报告」，路由 `magpie / codemaker-chat/deepseek-flash`。1 个 turn、20 步、37 次工具调用、103 秒。
+- 晋级之后给的是**延迟表**，不是全表。参考的稳态就是全量目录（它不做延迟加载）；本 preset 的
+  稳态是 10 个工具 + `tool_search`。
+- 不换提示词。参考在这一相位里连 persona 都换成 Minimal 那句
+  `You are a helpful software engineer assistant.`（`complete: true`、关运行时上下文）。照搬
+  等于首轮把 Claude Code 提示词换成另一句话，与复刻目标直接冲突。
+- 压缩不重新锚定。参考在 `compaction/end` 之后回落到引导对（epoch-aware）。这里压缩不重置。
+
+**相位从会话事件重建，不是进程内状态。** 用 `session.snapshotEvents()`（没有就用
+`session.events`）扫一次历史找 `tool/call`，之后靠 `session/event` 增量维护。恢复会话不会把
+引导相位重放一遍。读不出历史时按"已晋级"处理：宁可少放一次窄表，也不要因为一次读取失败把
+窄表长期留在会话里。引导集合里有一个名字没装配出来时也退回延迟表，不退全表。
+
+**代价。** 每场仍多一条 `request/header`，但方向反过来了：首轮从整张表 27 个降到 2 个，稳态
+仍是 10 个。短会话现在两轮都便宜。
+
+**首轮全表那一版的实测（2026-10-24 07:48，会话 `23ee8da0`）。** 任务「详细收集 kimi k3.1 pro
+的消息并报告」，路由 `magpie / codemaker-chat/deepseek-flash`，1 个 turn、20 步、37 次工具调用、
+103 秒。
 
 | 序 | 事件 | reason | 工具数 | 字节 |
 |---|---|---|---|---|
 | seq 13 | `request/header` | `initial` | 22 | 17,222 |
 | seq 25 | `request/header` | `change` | 10 | 10,925 |
 
-全场两条，没有第三条。首轮那张表里没有 `tool_search`，22 个名字与 2.13 的基线逐字一致。
+切换在第一次 `tool/call`（seq 19、20 两次 `web_search`）之后的下一轮。seq 26 是 harness 发的
+`developer/message`（`source.kind: tool-registry`）：一条 `tool-addition: tool_search` 加 13 条
+`tool-removal`。模型在表变化后的同一步 `select:web_fetch`（seq 28）拿到 schema，紧接三次并发
+抓页面（seq 36–38），全场用了 23 次，37 次调用没有一次失败。
 
-切换发生在第一次 `tool/call`（seq 19、20 的两次 `web_search`）之后的下一轮。seq 26 是 harness
-自己发的 `developer/message`（`source.kind: tool-registry`）：一条 `tool-addition: tool_search`
-加 13 条 `tool-removal`。模型被明确告知表变了，不用自己猜。
+这条记录现在证明的是另一件事：**晋级那一刻整张表换掉，不会打断工作**。方向接反了，但表切换
+本身是可行的。
 
-这条会话正好要 `web_fetch`——被延迟的 13 个之一。模型在表变化后的同一步里 `select:web_fetch`
-（seq 28）拿到 schema，紧接的三次调用并发抓页面（seq 36–38），全场用了 23 次。`read_image`
-同样先搜一次再用。37 次调用没有一次失败。
+同场还有一次空命中（seq 80 找 `multi_search` 等四个）：那四个名字来自 `web_search` 自己的
+描述末尾，而它们当时被 `tool-surface` 挡掉了——挡的是注册表，`tool_search` 的取回通道跟着
+一起断。已改：这四个从拦截名单挪到 `defer`，合计 2,984 字节。
 
-有一次空命中：seq 80 找 `multi_search`、`platform_search`、`advanced_search`、`free_search_test`，
-0 结果。这四个名字来自 `web_search` 自己的描述末尾，而那四个工具被 `tool-surface` 挡掉了——
-挡的是注册表，`tool_search` 的取回通道跟着一起断。
+**还没验的事。** 两条都没有我们自己的数据：
 
-**已改（2026-10-24）。** 这四个从拦截名单挪到 `defer`，合计 2,984 字节（1,038 / 626 / 663 /
-657）。稳态仍是 10 个工具，首轮从 22 变 26。和 2.12 的 `todo_write` 同一类问题：指令或描述
-点名了工具，模型就真的会去找，挡掉它只换来一次空搜。
-
-**还没验的事。** 这条锚定效应对 Claude Code 复刻成不成立，我们没有自己的数据。他们的数据是
-Minimal 与 Standard 两个家族之间的分野，不是"像不像 Claude Code"。要验就同一道题跑若干次，
-看开头风格和首个工具选择。在那之前，这只是把已知风险降一档，不是消除。
+- 这条锚定效应对 Claude Code 复刻成不成立。他们的数据是 Minimal 与 Standard 两个家族的分野，
+  不是"像不像 Claude Code"；而我们的首轮是「长提示词 + 2 个工具」，这个组合在他们的实验里
+  没出现过。
+- 首轮只有 2 个工具时，提示词点名了 `read`/`edit`/`todo_write`/`ask_user_question` 这些当轮
+  不存在的工具。这是 2.12 记过的「看得见的指令、看不见的工具」。一旦首轮开始绕，第一个要改的
+  是把 `read`/`edit` 加进 `bootstrapTools`，而不是撤掉相位。
 
 ### 2.15 评估：要不要接 dsh-TUI 的 skill-search（2026-10-24）
 
