@@ -11,22 +11,18 @@ function captureStderr() {
 	return { lines, restore: () => (console.error = original) }
 }
 
-/** 假 ctx：schemas 可变（模拟挂载时拿不到工具表），restrict 记下每次调用的名字。 */
-function harness({ schemas = [], restrictFails = () => undefined } = {}) {
+/** 假 ctx：记下 restrict 调用与监听器；schemas 只为证明没人去摸工具表。 */
+function harness() {
 	const listeners = new Map()
-	const denied = []
-	const state = { schemas }
+	const restricted = []
 	const ctx = {
 		logger: { info() {}, warn() {} },
 		tools: {
 			schemas() {
-				return state.schemas
+				return [{ name: 'working_directory' }, { name: 'read' }]
 			},
 			restrict(filter) {
-				const name = filter?.deny?.[0]
-				const failure = restrictFails(name)
-				if (failure !== undefined) throw new Error(failure)
-				denied.push(name)
+				restricted.push(filter)
 				return () => {}
 			},
 		},
@@ -40,86 +36,17 @@ function harness({ schemas = [], restrictFails = () => undefined } = {}) {
 			/* 生命周期在测试里不需要 */
 		},
 	}
-	return { ctx, state, denied, listener: (name) => listeners.get(name)?.[0] }
+	return { ctx, restricted, listener: (name) => listeners.get(name)?.[0] }
 }
 
-test('挂载时只挡 working_directory，其余宿主工具不碰', () => {
+test('不再拦截任何工具，也不装 pre-step 监听器', () => {
 	const stderr = captureStderr()
 	try {
-		const { ctx, denied } = harness({
-			schemas: [
-				{ name: 'read' },
-				{ name: 'working_directory' },
-				// 下面这些在 web/desktop 里宿主层本来就是 disabled，模型看不见它们靠的是
-				// 「没人挂」；本 preset 自己挂之后也不该再挡。
-				{ name: 'workflow' },
-				{ name: 'plugin_manager' },
-				{ name: 'present' },
-				{ name: 'create_goal' },
-				{ name: 'schedule_create' },
-				{ name: 'cordis_inspect_list' },
-				// free-search 的四个检索工具交给 tool-search 延迟，挡掉会连取回的路一起断。
-				{ name: 'advanced_search' },
-				{ name: 'multi_search' },
-				{ name: 'platform_search' },
-				{ name: 'free_search_test' },
-			],
-		})
+		const { ctx, restricted, listener } = harness()
 		apply(ctx)
-		assert.deepEqual(denied, ['working_directory'])
-		for (const name of [
-			'workflow',
-			'plugin_manager',
-			'present',
-			'create_goal',
-			'schedule_create',
-			'cordis_inspect_list',
-			'advanced_search',
-			'multi_search',
-			'platform_search',
-			'free_search_test',
-		]) {
-			assert.equal(denied.includes(name), false, `${name} 不该被挡`)
-		}
-		assert.match(stderr.lines.join('\n'), /restrict at mount:/)
-	} finally {
-		stderr.restore()
-	}
-})
-
-test('scoped 工具抛 unknown global tool 时保留，不重试', () => {
-	const stderr = captureStderr()
-	try {
-		const { ctx, denied } = harness({
-			schemas: [{ name: 'working_directory' }],
-			restrictFails: (name) => (name === 'working_directory' ? 'unknown global tool "working_directory"' : undefined),
-		})
-		apply(ctx)
-		assert.deepEqual(denied, [])
-		assert.match(stderr.lines.join('\n'), /scoped, kept working_directory/)
-	} finally {
-		stderr.restore()
-	}
-})
-
-test('挂载时拿不到工具表，则 pre-step 补扫一次', () => {
-	const stderr = captureStderr()
-	try {
-		const { ctx, state, denied, listener } = harness({ schemas: [] })
-		apply(ctx)
-		assert.deepEqual(denied, [])
-		assert.match(stderr.lines.join('\n'), /tool list unavailable/)
-
-		state.schemas = [{ name: 'working_directory' }, { name: 'read' }]
-		const preStep = listener('agent/pre-step')
-		assert.equal(typeof preStep, 'function')
-		let continued = false
-		preStep({}, () => {
-			continued = true
-		})
-		assert.equal(continued, true, 'pre-step 必须继续往下走')
-		assert.deepEqual(denied, ['working_directory'])
-		assert.match(stderr.lines.join('\n'), /restrict at pre-step:/)
+		// working_directory 已放开：它要作为宿主的全局工具出现在晋级之后的工具表里
+		assert.deepEqual(restricted, [])
+		assert.equal(listener('agent/pre-step'), undefined)
 	} finally {
 		stderr.restore()
 	}
@@ -128,7 +55,7 @@ test('挂载时拿不到工具表，则 pre-step 补扫一次', () => {
 test('审计按会话记账：基线一次，变化才再打', () => {
 	const stderr = captureStderr()
 	try {
-		const { ctx, listener } = harness({ schemas: [{ name: 'read' }] })
+		const { ctx, listener } = harness()
 		apply(ctx)
 		const onEvent = listener('session/event')
 		assert.equal(typeof onEvent, 'function')

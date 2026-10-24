@@ -762,11 +762,20 @@ min 3），`docs/plugin-config-audit.md` 2.12 早就记过这条，preset 里却
 | `cordis_inspect_*` | `dsh-tool-cordis` | 否（宿主那行只注册 providers） | 空转 |
 | `load_workspace_dependencies` | `dsh-tool-workspace-dependencies` | 否（这个包在 web/desktop 里没挂） | 空转 |
 
-**处置。** 名单只剩 `working_directory`，`EXCLUDED_PATTERNS` 清空；六类空转项改成由本 preset
-自己挂，全部**不进** `defer`：第一轮被引导相位挡住，晋级之后直接出现在工具表里。`goal` /
-`schedule_*` / `cordis_inspect_*` 各加一行；`workflow` 照 `standard` preset 的写法单开一个
-`isolate: workflowEngine` 组，引擎与工具放在一起，否则 `tool-workflow` 的 inject 永远等不到；
-`plugin_manager` 在官方 `standard` 里是 `disabled: true`，这里主动打开。
+**处置。** 六类空转项改成由本 preset 自己挂，全部**不进** `defer`：第一轮被引导相位挡住，
+晋级之后直接出现在工具表里。`goal` / `schedule_*` / `cordis_inspect_*` 各加一行；`workflow`
+照 `standard` preset 的写法单开一个 `isolate: workflowEngine` 组，引擎与工具放在一起，否则
+`tool-workflow` 的 inject 永远等不到；`plugin_manager` 在官方 `standard` 里是
+`disabled: true`，这里主动打开。
+
+**唯一真挡的那条也放开了（同日）。** `working_directory` 原来在名单里，是要它换会话工作目录
+这件事「不属于 Claude Code」。实际上它有用，所以放行：它由宿主的 `dsh-tool-working-directory`
+提供，不进 `defer`，首轮被引导相位挡住（白名单只留两个工具），晋级之后常驻。
+
+放开之后 `EXCLUDED_TOOLS` 与 `EXCLUDED_PATTERNS` 都空了，`sweep()` / `denyOne()` /
+`agent/pre-step` 补扫这一整套就没有调用方了——按「自己的改动造成的孤儿要自己清」一并删掉，
+`lib/tool-surface.js` 只剩审计。重新要挡时的三条约束（只认全局层、必须在第一次装配之前、
+与延迟互斥）写在那个文件头，代码量大约十来行。
 
 **`load_workspace_dependencies` 是两头空的幽灵。** 它同时出现在拦截名单和 `defer` 名单里，
 而这个包在 web/desktop 里根本没挂：拦截挡不到东西，`tool_search` 的描述里却又列着它，注定

@@ -46,49 +46,29 @@ CronCreate、Workflow 工具），语义一致；`plugin_manager` 与 `cordis_in
 - `plugin_manager` 能让模型改本 profile 的插件配置，官方 `standard` preset 里这一行是
   `disabled: true`，这里主动打开了。
 
+`working_directory` 不在上面这一串里：它由宿主层的 `dsh-tool-working-directory` 提供，
+本 preset 只负责不挡它。首轮看不见（引导相位只留两个工具），晋级之后常驻。
+
 ## 工具面怎么收敛
 
-`lib/tool-surface.js` 的名单在文件顶部：`EXCLUDED_TOOLS` 是名字，`EXCLUDED_PATTERNS` 是前缀。
-**现在只剩一条**：`working_directory`——它让模型换会话工作目录，Claude Code 没有对应物
-（靠 Bash 的 cwd）。
-
-原来的其余成员（goal 三件套、`workflow`、`plugin_manager`、`schedule_*`、`cordis_inspect*`、
-`load_workspace_dependencies`）在 web/desktop 里从来没被挡到过：宿主层把这些行设成
-`disabled: true`，模型看不见它们靠的是「没人挂」，不是「被挡住」。2026-10-24 核对了
-`dsh --profile web --dump-config` 之后把它们从名单里删了，需要的一律改成自己挂。
-
-没挡的三类，都是「挡掉会把取回的路一起断掉」：free-search 的四个检索工具、`present`、
-引导相位之外由 `tool-search` 延迟的一切。`restrict` 是注册表级的，被挡的名字不进装配、
-不进 `tool_search` 的目录、按名字调用还会被判成不存在的工具——所以凡是希望在延迟后能拿回来
-的，就绝不能进这个名单。
-
-两件事值得说明：
-
-1. **不用维护完整名单**。`schemas()` 不带 scope 就是全局视图，列出的都是 `restrict` 能收窄的
-   全局工具；preset 自己注册的 scoped 工具根本不在这个列表里，不会被误挡。名单只写要挡的
-   宿主工具即可。
-2. **只在挂载时扫一次**。agent loop 的顺序是「装配工具 → `agent/pre-step` → 记 `request/header`」，
-   在 pre-step 里挡工具只能改变下一轮——那正好制造一次工具表变化、一次全前缀重建
-   （本机实测 7,090 input token，等于 7 个普通轮次）。晚注册的宿主工具就留在表里，比付一次
-   重建便宜。唯一的例外是挂载时压根没拿到工具表：那时什么都没挡住，`agent/pre-step` 会补扫
-   一次。
-
-在 web/desktop 里只剩 `working_directory` 一条会真的被挡——它也是宿主层唯一注册成全局工具、
-又该挡的模型可见工具。headless 组合不读 agent preset，这份名单在那里没有意义。
-
-free-search 的四个检索工具（`advanced_search`、`multi_search`、`platform_search`、
-`free_search_test`，合计 2,984 字节）**不挡**，交给 `tool-search` 延迟。原因在下面「工具延迟」一节。
-
-日志里 `denied` 后面列的是这次真的挡掉的名字。
-
-日志里能看到实际效果：
+不再收敛。`lib/tool-surface.js` 现在只做审计：`request/header` 一变就输出一行——工具数、
+工具块字节、按 4 字符/token 粗估的 token、这次相比上次增删了谁。工具块在请求最前面，任何
+字节变化都会让缓存从该 token 起失效，这行就是那次失效的凭证。
 
 ```
-[tool-surface] restrict at mount: denied working_directory
 [tool-surface] baseline #1: <工具数> tools, <字节> bytes (~<tokens> tok est) | session <id>
+[tool-surface] change #2: ... | +glob | -skill | cache: reuse invalidated from the first changed tool token
 ```
 
-第二条只在工具表真的变化时才打印（工具数、字节、粗估 token、增删了谁）。
+这个文件早先负责挡住一批宿主工具，2026-10-24 全清：
+
+| 原拦截项 | 当时的真实情况 |
+|---|---|
+| goal 三件套、`workflow`、`plugin_manager`、`schedule_*`、`cordis_inspect*`、`load_workspace_dependencies` | 宿主层把这些行设成 `disabled: true`，模型看不见它们靠的是「没人挂」，拦截从来没生效过 |
+| `working_directory` | 唯一真正被挡的。现已放开，首轮被引导相位挡住，晋级之后常驻 |
+
+要重新挡一个工具，三条约束记在 `lib/tool-surface.js` 文件头：`restrict` 只认全局层的名字、
+必须在第一次装配之前调（晚一步就是一次全前缀重建）、被挡的名字拿不回 schema 所以和延迟互斥。
 
 ## 工具延迟
 

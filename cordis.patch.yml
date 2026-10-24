@@ -329,6 +329,8 @@
           # 工具换不到锚定收益——锚定说的是顶层会话怎么开局。判定按 delegationDepth > 0
           # （会话头或运行时 options，取较大的那个），对齐参考实现的 includeSubagents
           # 默认 false。
+          # 常驻、但不在引导集合里的工具（例如宿主全局的 working_directory）首轮同样被挡住，
+          # 晋级之后才出现——白名单自动覆盖这一类，不需要单独配置。
           - id: tool-search
             name: 'dsh-claude-preset/lib/tool-search.js'
             config:
@@ -339,29 +341,18 @@
               bootstrapTools: !!js >-
                 process.platform === 'win32' ? ['pwsh', 'str_replace_editor'] : ['bash', 'str_replace_editor']
               bootstrapSuppressContext: ['skill-catalog', 'agent-instructions']
-          # 工具面收敛 + 缓存代价观测。不做延迟加载。
+          # 工具表审计 + 缓存代价观测。不再拦截任何工具。
           #
-          # 规则：只挡住明确不属于 Claude Code 语义的宿主工具——goal 三件套、
-          # workflow、working_directory、plugin_manager、load_workspace_dependencies，
-          # 以及 cordis_inspect_* / present / schedule_* 这类按前缀识别的。名单短且稳定，
-          # 挡掉即消失，不提供取回通道。
-          # free-search 的四个检索工具不在这里挡：它们交给 tool-search 延迟，挡掉连取回
-          # 的路一起断掉。web_search 的描述末尾点着这四个名字，模型会去搜。
-          # schemas() 不带 scope 就是全局视图，列出的都是能收窄的全局工具；
-          # preset 自己的 scoped 工具不在其中，不会被误挡。
+          # 早先这里挡过一批宿主工具，2026-10-24 全清：web/desktop 里宿主层本来就把那些行
+          # 设成 disabled，模型看不见 goal / workflow / schedule / plugin_manager /
+          # cordis_inspect 靠的是「没人挂」，不是「被挡住」；需要的能力改成上面自己挂。
+          # 最后一条 working_directory 也放开了：它由宿主的 dsh-tool-working-directory
+          # 提供，不在 defer 名单里，所以首轮被引导相位挡住、晋级之后常驻工具表。
           #
-          # 实际挡掉多少取决于组合：base-only 时 goal 三件套和 workflow 都在全局层，
-          # 合计约 3.7KB（占 22 个工具、17.3KB 工具块的 21%）；Web/Desktop 组合里
-          # dsh-web-app 已把 tool-goal / tool-workflow / tool-plugin-manager 设成
-          # disabled，名单里这些名字空转，通常只剩 working_directory。
-          #
-          # 收敛时机：agent loop 的顺序是「装配 → pre-step → 记 request/header」，
-          # 装配在 pre-step 之前，所以 pre-step 里挡工具永远只改变下一次请求，
-          # 那正好制造一次工具表变化、一次全前缀重建（实测 7,090 input token）。
-          # 因此收敛只在 apply()（agent 创建时，早于第一次装配）做一次，之后不再动；
-          # Desktop 的 load_workspace_dependencies 这类晚注册工具就留在表里——
-          # 留着比付一次重建便宜得多。
-          # 只有挂载时拿不到工具表才例外：那样一条都没挡住，agent/pre-step 会补扫一次。
+          # 要重新挡一个工具：ctx.tools.restrict({ deny: [name] })，只能挡全局层的名字，
+          # 且要在第一次装配之前调——晚一步就是一次工具表变化加一次全前缀重建（实测
+          # 7,090 input token，约等于 7 个普通轮次）。被挡的名字也拿不回 schema，
+          # 所以延迟与拦截互斥。细节写在 lib/tool-surface.js 的文件头。
           #
           # 审计行只在 request/header 变化时输出：工具数、总字节、按 4 字符/token 粗估
           # 的 token、这次相比上次增删了谁。工具块变一次，缓存就从那个 token 起失效一次。
