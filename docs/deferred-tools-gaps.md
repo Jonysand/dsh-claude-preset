@@ -628,6 +628,36 @@ seq 308 一次取 4 个）、1 次空命中（找 REA 工具，那批工具不�
 Minimal 与 Standard 两个家族之间的分野，不是"像不像 Claude Code"。要验就同一道题跑若干次，
 看开头风格和首个工具选择。在那之前，这只是把已知风险降一档，不是消除。
 
+### 2.15 评估：要不要接 dsh-TUI 的 skill-search（2026-10-24）
+
+看的是 `presets/liangshen/skill-search.mjs`。它做的事：把 `dsh-tool-skill` 整行换掉，不再注入
+技能目录，改成两个工具——`skill_search`（按关键词查名字和描述，最多 20 条）、`skill_load`
+（按名字取正文，`agent.inject` 进下一轮）。
+
+**它盯的成本是真的。** 本工作区 28 个 skill 的目录 8,966 字节，从第一轮起就在历史里，每次请求
+都跟着走。拆开：描述 7,543（85%）、名字 419、包装 879。比我们延迟 13 个工具省下的 6,297 字节
+还大。
+
+**但这笔钱有一行配置的杠杆。** `dsh-tool-skill` 自带 `catalogDescriptionMaxLength`（默认 500，
+min 3），`docs/plugin-config-audit.md` 2.12 早就记过这条，preset 里却一直没设。描述第一句长度
+中位数 63 字、p90 138 字、最长 498 字（`j-space`）。压到 120 之后目录约 6.1 KB，每次请求省
+2.8 KB。
+
+**技能用得少，但用的时候一步命中。** 扫了 80 场会话、约 9,500 次工具调用，`skill` 一共 11 次
+（0.12%）。全部落在 seq 18–30，直接按目录点名：`jenkins-auth` 三场、`redmine`、
+`h42-patch-reference`、`cordis` 两个（dev 与 standard 各一场）。没有一次走弯路。
+
+**所以不接。** 三条：
+
+1. 换成 `skill_search` 之后，那 11 次会从"看一眼目录直接调"变成"先搜再调"，而 `skill_load`
+   把正文 inject 进下一轮，比现有 `skill` 工具还多一步。
+2. 我们的提示词是从 Claude Code 原样搬的，第 105 行写着 "…matches a skill in the available
+   skills list"。删掉目录这句话就悬空了——和 2.14 那四个检索工具同一类问题，只是方向相反。
+3. 一行配置拿走 2.8 KB，没必要为剩下的 2.8 KB 加两个工具、改提示词、再背一套技能发现逻辑。
+
+**留着备选。** 想再省不必换实现：把 `catalogDescriptionMaxLength` 压到 3，目录只剩名字
+（约 1.3 KB，省 7.6 KB）；再不够才轮到按需搜索。
+
 ---
 
 ## 三、两者的关系

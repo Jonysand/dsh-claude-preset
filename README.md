@@ -149,6 +149,21 @@ free-search 的四个检索工具（`advanced_search`、`multi_search`、`platfo
 作用域不用担心：监听器和工具都挂在 preset 自己的插件树上，只对本 preset 代际的会话生效，
 同进程里别的 preset 不受影响（实测见 [docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.8）。
 
+## 技能目录
+
+`dsh-tool-skill` 会把每个 skill 的名字和截断后的描述拼成一段 `<system-reminder>` 塞进历史，
+从第一轮起就跟着每次请求走。本工作区 28 个 skill 合计 8,966 字节，描述占 7,543（85%），
+名字只有 419。
+
+配置里把 `catalogDescriptionMaxLength` 从默认 500 压到 120，目录降到约 6.1 KB。描述第一句的
+长度中位数 63 字、p90 138 字，120 保得住绝大多数条目的第一句——超过 120 的通常是末尾那串
+触发条件，而名字本身已经把话说清（`jenkins-auth`、`tracy-analysis`、`crash-fix`）。
+
+不加按需搜索的理由：技能用得很少，但用上的时候是一步到位。80 场会话、约 9,500 次工具调用里
+`skill` 只出现 11 次（0.12%），全部落在 seq 18–30，直接按目录点名，没有一次弯路。换成
+「先搜再取」会让这 11 次各多一步，而目录本身一行配置就能砍掉三成。评估过程见
+[docs/deferred-tools-gaps.md](docs/deferred-tools-gaps.md) 2.15。
+
 ## 安装
 
 前提：DSH 与这些包同版本，当前为 `0.2.1-rc.2`。依赖清单见 [docs/dependencies.md](docs/dependencies.md)。

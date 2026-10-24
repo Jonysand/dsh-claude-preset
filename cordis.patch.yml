@@ -147,8 +147,17 @@
             name: '@deepseek-ai/dsh-tool-jobs'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+          # 技能目录：每个 skill 的名字加截断后的描述，一段进历史、跟着每次请求走。
+          # 实测 28 个 skill 合计 8,966 字节，其中描述占 85%（名字只有 419）。默认
+          # 500 字的上限正好把最长的那几条卡在 500，而它们长在末尾——"什么时候用"往往
+          # 写在最后。描述第一句的长度中位数 63、p90 138，所以 120 能保住绝大多数条目
+          # 的第一句（j-space 那种 498 字的长句会被截）。
+          # 剩下约 6.1KB，比默认省 2.8KB/请求。再想省就把这个数压到 3，只留名字
+          # （约 1.3KB）；那一步的代价是模型只能按名字认技能。
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
+            config:
+              catalogDescriptionMaxLength: 120
           - id: planning
             name: cordis:group
             group: true
